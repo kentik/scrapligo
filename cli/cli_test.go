@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	mathrand "math/rand"
 	"net"
@@ -21,6 +22,8 @@ import (
 const (
 	testHost = "localhost"
 )
+
+var errOperationFailed = errors.New("operation returned failed result")
 
 func TestMain(m *testing.M) {
 	scrapligotesthelper.Flags()
@@ -126,7 +129,7 @@ func TestConcurrency(t *testing.T) { //nolint: gocognit
 			operationCount := 20
 			errCh := make(chan error, operationCount)
 
-			for operationID := 0; operationID < operationCount; operationID++ {
+			for operationID := range operationCount {
 				wg.Add(1)
 
 				go func(operationID int) {
@@ -174,7 +177,7 @@ func TestConcurrency(t *testing.T) { //nolint: gocognit
 					}
 
 					if r.Failed() {
-						errCh <- fmt.Errorf("operation %d returned failed result", operationID)
+						errCh <- fmt.Errorf("operation %d: %w", operationID, errOperationFailed)
 					}
 				}(operationID)
 			}
@@ -197,7 +200,11 @@ func waitForTestServer(t *testing.T, address string, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 
 	for {
-		conn, err := (&net.Dialer{Timeout: 100 * time.Millisecond}).DialContext(context.Background(), "tcp", address)
+		conn, err := (&net.Dialer{Timeout: 100 * time.Millisecond}).DialContext(
+			context.Background(),
+			"tcp",
+			address,
+		)
 		if err == nil {
 			_ = conn.Close()
 
