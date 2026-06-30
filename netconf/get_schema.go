@@ -7,7 +7,9 @@ import (
 )
 
 func newGetSchemaOptions(options ...Option) *getSchemaOptions {
-	o := &getSchemaOptions{}
+	o := &getSchemaOptions{
+		format: SchemaFormatYang,
+	}
 
 	for _, opt := range options {
 		opt(o)
@@ -18,17 +20,7 @@ func newGetSchemaOptions(options ...Option) *getSchemaOptions {
 
 type getSchemaOptions struct {
 	version string
-	format  *SchemaFormat
-}
-
-func (o *getSchemaOptions) getFormat() *uint8 {
-	if o.format == nil {
-		return nil
-	}
-
-	v := uint8(*o.format)
-
-	return &v
+	format  SchemaFormat
 }
 
 // GetSchema executes a netconf get-schema rpc
@@ -55,7 +47,7 @@ func (n *Netconf) GetSchema(
 		&cancel,
 		identifier,
 		loadedOptions.version,
-		loadedOptions.getFormat(),
+		loadedOptions.format.String(),
 	)
 	if err != nil {
 		return nil, err

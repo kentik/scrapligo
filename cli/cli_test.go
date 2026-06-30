@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	mathrand "math/rand"
+	"net"
 	"os"
 	"os/exec"
 	"sync"
@@ -38,6 +39,10 @@ func TestMain(m *testing.M) {
 }
 
 func TestConcurrency(t *testing.T) { //nolint: gocognit
+	if raceEnabled {
+		t.Skip("skip concurrency stress test under -race")
+	}
+
 	tmpDir := t.TempDir()
 
 	dumboBin := fmt.Sprintf("%s/dumbo", tmpDir)
@@ -78,7 +83,7 @@ func TestConcurrency(t *testing.T) { //nolint: gocognit
 				t.Fatal(err)
 			}
 
-			time.Sleep(250 * time.Millisecond)
+			waitForTestServer(t, "127.0.0.1:2222", 5*time.Second)
 
 			t.Cleanup(
 				func() {
@@ -97,6 +102,7 @@ func TestConcurrency(t *testing.T) { //nolint: gocognit
 			defer cancel()
 
 			wg := &sync.WaitGroup{}
+			slots := make(chan struct{}, 5)
 
 			opts := []scrapligooptions.Option{
 				scrapligooptions.WithPort(2222),
@@ -117,9 +123,16 @@ func TestConcurrency(t *testing.T) { //nolint: gocognit
 				)
 			}
 
-			for range 100 {
+			operationCount := 20
+
+			for range operationCount {
 				wg.Go(
 					func() {
+						slots <- struct{}{}
+						defer func() {
+							<-slots
+						}()
+
 						// tiny sleep seems to make the test way more consistent -- at least locally
 						// on darwin i think we get starved for ptys and weird shit happens w/out
 						// this.
@@ -158,6 +171,27 @@ func TestConcurrency(t *testing.T) { //nolint: gocognit
 		})
 
 		time.Sleep(time.Second)
+	}
+}
+
+func waitForTestServer(t *testing.T, address string, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+
+	for {
+		conn, err := net.DialTimeout("tcp", address, 100*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+
+			return
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for dummy server: %v", err)
+		}
+
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

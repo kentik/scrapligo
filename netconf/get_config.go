@@ -7,7 +7,11 @@ import (
 )
 
 func newGetConfigOptions(options ...Option) *getConfigOptions {
-	o := &getConfigOptions{}
+	o := &getConfigOptions{
+		source:       DatastoreTypeRunning,
+		filterType:   FilterTypeSubtree,
+		defaultsType: DefaultsTypeUnset,
+	}
 
 	for _, opt := range options {
 		opt(o)
@@ -17,27 +21,13 @@ func newGetConfigOptions(options ...Option) *getConfigOptions {
 }
 
 type getConfigOptions struct {
-	source                *DatastoreType
+	source                DatastoreType
 	filter                string
-	filterType            *FilterType
+	filterType            FilterType
 	filterNamespacePrefix string
 	filterNamespace       string
-	defaultsType          *DefaultsType
+	defaultsType          DefaultsType
 }
-
-func (o *getConfigOptions) getSource() *uint8 {
-	if o.source == nil {
-		return nil
-	}
-
-	v := uint8(*o.source)
-
-	return &v
-}
-
-func (o *getConfigOptions) getFilterType() *uint8 { return nil }
-
-func (o *getConfigOptions) getDefaultsType() *uint8 { return nil }
 
 // GetConfig executes a netconf getconfig rpc. Supported options:
 //   - WithSourceType
@@ -64,12 +54,12 @@ func (n *Netconf) GetConfig(
 		n.ptr,
 		&operationID,
 		&cancel,
-		loadedOptions.getSource(),
+		loadedOptions.source.String(),
 		loadedOptions.filter,
-		loadedOptions.getFilterType(),
+		loadedOptions.filterType.String(),
 		loadedOptions.filterNamespacePrefix,
 		loadedOptions.filterNamespace,
-		loadedOptions.getDefaultsType(),
+		loadedOptions.defaultsType.String(),
 	)
 	if err != nil {
 		return nil, err

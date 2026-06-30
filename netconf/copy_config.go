@@ -7,7 +7,10 @@ import (
 )
 
 func newCopyConfigOptions(options ...Option) *copyConfigOptions {
-	o := &copyConfigOptions{}
+	o := &copyConfigOptions{
+		target: DatastoreTypeRunning,
+		source: DatastoreTypeStartup,
+	}
 
 	for _, opt := range options {
 		opt(o)
@@ -17,28 +20,8 @@ func newCopyConfigOptions(options ...Option) *copyConfigOptions {
 }
 
 type copyConfigOptions struct {
-	target *DatastoreType
-	source *DatastoreType
-}
-
-func (o *copyConfigOptions) getTarget() *uint8 {
-	if o.target == nil {
-		return nil
-	}
-
-	v := uint8(*o.target)
-
-	return &v
-}
-
-func (o *copyConfigOptions) getSource() *uint8 {
-	if o.source == nil {
-		return nil
-	}
-
-	v := uint8(*o.source)
-
-	return &v
+	target DatastoreType
+	source DatastoreType
 }
 
 // CopyConfig executes a netconf copy config rpc. Supported options:
@@ -62,8 +45,8 @@ func (n *Netconf) CopyConfig(
 		n.ptr,
 		&operationID,
 		&cancel,
-		loadedOptions.getTarget(),
-		loadedOptions.getSource(),
+		loadedOptions.target.String(),
+		loadedOptions.source.String(),
 	)
 	if err != nil {
 		return nil, err

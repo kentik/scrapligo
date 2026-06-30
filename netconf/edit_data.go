@@ -7,7 +7,9 @@ import (
 )
 
 func newEditDataOptions(options ...Option) *editDataOptions {
-	o := &editDataOptions{}
+	o := &editDataOptions{
+		datastore: DatastoreTypeRunning,
+	}
 
 	for _, opt := range options {
 		opt(o)
@@ -17,28 +19,16 @@ func newEditDataOptions(options ...Option) *editDataOptions {
 }
 
 type editDataOptions struct {
-	datastore        *DatastoreType
+	datastore        DatastoreType
 	defaultOperation *DefaultOperation
 }
 
-func (o *editDataOptions) getDatastore() *uint8 {
-	if o.datastore == nil {
-		return nil
-	}
-
-	v := uint8(*o.datastore)
-
-	return &v
-}
-
-func (o *editDataOptions) getDefaultOperation() *uint8 {
+func (o *editDataOptions) getDefaultOperation() string {
 	if o.defaultOperation == nil {
-		return nil
+		return ""
 	}
 
-	v := uint8(*o.defaultOperation)
-
-	return &v
+	return o.defaultOperation.String()
 }
 
 // EditData executes a netconf edit-data rpc. Supported options:
@@ -62,7 +52,7 @@ func (n *Netconf) EditData(
 		n.ptr,
 		&operationID,
 		&cancel,
-		loadedOptions.getDatastore(),
+		loadedOptions.datastore.String(),
 		content,
 		loadedOptions.getDefaultOperation(),
 	)

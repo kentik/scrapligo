@@ -7,7 +7,9 @@ import (
 )
 
 func newEditConfigOptions(options ...Option) *editConfigOptions {
-	o := &editConfigOptions{}
+	o := &editConfigOptions{
+		target: DatastoreTypeRunning,
+	}
 
 	for _, opt := range options {
 		opt(o)
@@ -17,50 +19,34 @@ func newEditConfigOptions(options ...Option) *editConfigOptions {
 }
 
 type editConfigOptions struct {
-	target           *DatastoreType
+	target           DatastoreType
 	defaultOperation *DefaultOperation
 	testOption       *TestOption
 	errorOption      *ErrorOption
 }
 
-func (o *editConfigOptions) getTarget() *uint8 {
-	if o.target == nil {
-		return nil
-	}
-
-	v := uint8(*o.target)
-
-	return &v
-}
-
-func (o *editConfigOptions) getDefaultOperation() *uint8 {
+func (o *editConfigOptions) getDefaultOperation() string {
 	if o.defaultOperation == nil {
-		return nil
+		return ""
 	}
 
-	v := uint8(*o.defaultOperation)
-
-	return &v
+	return o.defaultOperation.String()
 }
 
-func (o *editConfigOptions) getTestOption() *uint8 {
+func (o *editConfigOptions) getTestOption() string {
 	if o.testOption == nil {
-		return nil
+		return ""
 	}
 
-	v := uint8(*o.testOption)
-
-	return &v
+	return o.testOption.String()
 }
 
-func (o *editConfigOptions) getErrorOption() *uint8 {
+func (o *editConfigOptions) getErrorOption() string {
 	if o.errorOption == nil {
-		return nil
+		return ""
 	}
 
-	v := uint8(*o.errorOption)
-
-	return &v
+	return o.errorOption.String()
 }
 
 // EditConfig executes a netconf edit config rpc. Supported options:
@@ -85,7 +71,7 @@ func (n *Netconf) EditConfig(
 		&operationID,
 		&cancel,
 		config,
-		loadedOptions.getTarget(),
+		loadedOptions.target.String(),
 		loadedOptions.getDefaultOperation(),
 		loadedOptions.getTestOption(),
 		loadedOptions.getErrorOption(),

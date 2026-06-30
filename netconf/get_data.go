@@ -7,7 +7,11 @@ import (
 )
 
 func newGetDataOptions(options ...Option) *getDataOptions {
-	o := &getDataOptions{}
+	o := &getDataOptions{
+		filterType:   FilterTypeSubtree,
+		defaultsType: DefaultsTypeUnset,
+		configFilter: ConfigFilterUnset,
+	}
 
 	for _, opt := range options {
 		opt(o)
@@ -17,63 +21,16 @@ func newGetDataOptions(options ...Option) *getDataOptions {
 }
 
 type getDataOptions struct {
-	datastore             *DatastoreType
+	datastore             DatastoreType
 	filter                string
-	filterType            *FilterType
+	filterType            FilterType
 	filterNamespacePrefix string
 	filterNamespace       string
-	configFilter          *ConfigFilter
+	configFilter          ConfigFilter
 	originFilters         string
 	maxDepth              uint32
 	withOrigin            bool
-	defaultsType          *DefaultsType
-}
-
-func (o *getDataOptions) getDatastore() *uint8 {
-	if o.datastore == nil {
-		return nil
-	}
-
-	v := uint8(*o.datastore)
-
-	return &v
-}
-
-func (o *getDataOptions) getFilterType() *uint8 {
-	if o.filterType == nil {
-		return nil
-	}
-
-	v := uint8(*o.filterType)
-
-	return &v
-}
-
-func (o *getDataOptions) getConfigFilter() *bool {
-	if o.configFilter == nil {
-		return nil
-	}
-
-	var v bool
-
-	switch *o.configFilter {
-	case ConfigFilterTrue:
-		v = true
-	case ConfigFilterFalse:
-		v = false
-	}
-
-	return &v
-}
-
-func (o *getDataOptions) getDefaultsType() *uint8 {
-	if o.defaultsType == nil {
-		return nil
-	}
-
-	v := uint8(*o.defaultsType)
-
-	return &v
+	defaultsType          DefaultsType
 }
 
 // GetData executes a netconf get-data rpc. Supported options:
@@ -105,16 +62,16 @@ func (n *Netconf) GetData(
 		n.ptr,
 		&operationID,
 		&cancel,
-		loadedOptions.getDatastore(),
+		loadedOptions.datastore.String(),
 		loadedOptions.filter,
-		loadedOptions.getFilterType(),
+		loadedOptions.filterType.String(),
 		loadedOptions.filterNamespacePrefix,
 		loadedOptions.filterNamespace,
-		loadedOptions.getConfigFilter(),
+		loadedOptions.configFilter.String(),
 		loadedOptions.originFilters,
 		loadedOptions.maxDepth,
 		loadedOptions.withOrigin,
-		loadedOptions.getDefaultsType(),
+		loadedOptions.defaultsType.String(),
 	)
 	if err != nil {
 		return nil, err

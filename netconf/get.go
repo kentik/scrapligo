@@ -7,7 +7,10 @@ import (
 )
 
 func newGetOptions(options ...Option) *getOptions {
-	o := &getOptions{}
+	o := &getOptions{
+		filterType:   FilterTypeSubtree,
+		defaultsType: DefaultsTypeUnset,
+	}
 
 	for _, opt := range options {
 		opt(o)
@@ -18,30 +21,10 @@ func newGetOptions(options ...Option) *getOptions {
 
 type getOptions struct {
 	filter                string
-	filterType            *FilterType
+	filterType            FilterType
 	filterNamespacePrefix string
 	filterNamespace       string
-	defaultsType          *DefaultsType
-}
-
-func (o *getOptions) getFilterType() *uint8 {
-	if o.filterType == nil {
-		return nil
-	}
-
-	v := uint8(*o.filterType)
-
-	return &v
-}
-
-func (o *getOptions) getDefaultsType() *uint8 {
-	if o.defaultsType == nil {
-		return nil
-	}
-
-	v := uint8(*o.defaultsType)
-
-	return &v
+	defaultsType          DefaultsType
 }
 
 // Get executes a netconf get rpc. Supported options:
@@ -69,10 +52,10 @@ func (n *Netconf) Get(
 		&operationID,
 		&cancel,
 		loadedOptions.filter,
-		loadedOptions.getFilterType(),
+		loadedOptions.filterType.String(),
 		loadedOptions.filterNamespacePrefix,
 		loadedOptions.filterNamespace,
-		loadedOptions.getDefaultsType(),
+		loadedOptions.defaultsType.String(),
 	)
 	if err != nil {
 		return nil, err
