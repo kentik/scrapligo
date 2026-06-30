@@ -120,7 +120,7 @@ func main() {
 		},
 	}
 
-	listener, err := listenConfig.Listen(ctx, "tcp", "0.0.0.0:2222")
+	listener, err := listenConfig.Listen(ctx, "tcp", "127.0.0.1:2222")
 	if err != nil {
 		panic(err)
 	}
