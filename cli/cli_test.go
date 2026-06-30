@@ -2,9 +2,14 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	mathrand "math/rand"
 	"os"
+	"os/exec"
+	"sync"
 	"testing"
+	"time"
 
 	scrapligocli "github.com/kentik/scrapligo/v2/cli"
 	scrapligoffi "github.com/kentik/scrapligo/v2/ffi"
@@ -30,6 +35,130 @@ func TestMain(m *testing.M) {
 	_, _ = fmt.Fprintln(os.Stderr, "no memory leak(s) detected!")
 
 	os.Exit(exitCode)
+}
+
+func TestConcurrency(t *testing.T) { //nolint: gocognit
+	tmpDir := t.TempDir()
+
+	dumboBin := fmt.Sprintf("%s/dumbo", tmpDir)
+
+	dumboBuild := exec.CommandContext( //nolint: gosec
+		t.Context(),
+		"go",
+		"build",
+		"-o",
+		dumboBin,
+		"main.go",
+	)
+
+	dumboBuild.Dir = "../build/dummy_ssh_server"
+
+	err := dumboBuild.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, transportName := range []string{
+		"bin",
+		"ssh2",
+	} {
+		testName := fmt.Sprintf("concurrencty-%s", transportName)
+
+		t.Run(testName, func(t *testing.T) {
+			t.Logf("%s: starting", testName)
+			defer t.Logf("%s: complete", testName)
+
+			dumboCmd := exec.CommandContext(
+				t.Context(),
+				dumboBin,
+			)
+
+			err = dumboCmd.Start()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			time.Sleep(250 * time.Millisecond)
+
+			t.Cleanup(
+				func() {
+					t.Log("cleanup dummy server")
+
+					err = dumboCmd.Process.Kill()
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					_ = dumboCmd.Wait()
+				},
+			)
+
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+
+			wg := &sync.WaitGroup{}
+
+			opts := []scrapligooptions.Option{
+				scrapligooptions.WithPort(2222),
+				scrapligooptions.WithUsername("admin"),
+				scrapligooptions.WithPassword("password"),
+			}
+
+			if transportName == "bin" {
+				opts = append(
+					opts,
+					scrapligooptions.WithTransportBin(),
+					scrapligooptions.WithBinTransportExtraArgs("-F /dev/null"),
+				)
+			} else {
+				opts = append(
+					opts,
+					scrapligooptions.WithTransportSSH2(),
+				)
+			}
+
+			for range 100 {
+				wg.Go(
+					func() {
+						// tiny sleep seems to make the test way more consistent -- at least locally
+						// on darwin i think we get starved for ptys and weird shit happens w/out
+						// this.
+						time.Sleep(
+							time.Duration(mathrand.Intn(100)) * time.Millisecond, //nolint:gosec
+						)
+
+						c, err := scrapligocli.NewCli( //nolint: contextcheck
+							"localhost",
+							opts...,
+						)
+						if err != nil {
+							t.Fatal(err)
+						}
+
+						_, err = c.Open(ctx)
+						if err != nil {
+							t.Fatal(err)
+						}
+
+						defer func() {
+							_, _ = c.Close(ctx)
+						}()
+
+						r, err := c.SendInput(ctx, "show version")
+						if err != nil {
+							t.Fatal(err)
+						}
+
+						scrapligotesthelper.AssertEqual(t, false, r.Failed())
+					},
+				)
+			}
+
+			wg.Wait()
+		})
+
+		time.Sleep(time.Second)
+	}
 }
 
 func getCli(t *testing.T, f string) *scrapligocli.Cli {
