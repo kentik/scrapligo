@@ -67,7 +67,7 @@ func TestConcurrency(t *testing.T) { //nolint: gocognit
 		"bin",
 		"ssh2",
 	} {
-		testName := fmt.Sprintf("concurrencty-%s", transportName)
+		testName := fmt.Sprintf("concurrency-%s", transportName)
 
 		t.Run(testName, func(t *testing.T) {
 			t.Logf("%s: starting", testName)
