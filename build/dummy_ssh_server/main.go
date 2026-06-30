@@ -213,7 +213,7 @@ func handleChannel(channel ssh.Channel, requests <-chan *ssh.Request) {
 			continue
 		}
 
-		// echo input back on the hcannel
+		// echo input back on the channel
 		_, err = channel.Write(buf[:n])
 		if err != nil {
 			break
