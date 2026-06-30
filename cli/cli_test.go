@@ -124,51 +124,67 @@ func TestConcurrency(t *testing.T) { //nolint: gocognit
 			}
 
 			operationCount := 20
+			errCh := make(chan error, operationCount)
 
-			for range operationCount {
-				wg.Go(
-					func() {
-						slots <- struct{}{}
+			for operationID := 0; operationID < operationCount; operationID++ {
+				wg.Add(1)
 
-						defer func() {
-							<-slots
-						}()
+				go func(operationID int) {
+					defer wg.Done()
 
-						// tiny sleep seems to make the test way more consistent -- at least locally
-						// on darwin i think we get starved for ptys and weird shit happens w/out
-						// this.
-						time.Sleep(
-							time.Duration(mathrand.Intn(100)) * time.Millisecond, //nolint:gosec
-						)
+					slots <- struct{}{}
 
-						c, err := scrapligocli.NewCli( //nolint: contextcheck
-							"localhost",
-							opts...,
-						)
-						if err != nil {
-							t.Fatal(err)
-						}
+					defer func() {
+						<-slots
+					}()
 
-						_, err = c.Open(ctx)
-						if err != nil {
-							t.Fatal(err)
-						}
+					// tiny sleep seems to make the test way more consistent -- at least locally
+					// on darwin i think we get starved for ptys and weird shit happens w/out
+					// this.
+					time.Sleep(
+						time.Duration(mathrand.Intn(100)) * time.Millisecond, //nolint:gosec
+					)
 
-						defer func() {
-							_, _ = c.Close(ctx)
-						}()
+					c, err := scrapligocli.NewCli( //nolint: contextcheck
+						"localhost",
+						opts...,
+					)
+					if err != nil {
+						errCh <- fmt.Errorf("operation %d new cli: %w", operationID, err)
 
-						r, err := c.SendInput(ctx, "show version")
-						if err != nil {
-							t.Fatal(err)
-						}
+						return
+					}
 
-						scrapligotesthelper.AssertEqual(t, false, r.Failed())
-					},
-				)
+					_, err = c.Open(ctx)
+					if err != nil {
+						errCh <- fmt.Errorf("operation %d open: %w", operationID, err)
+
+						return
+					}
+
+					defer func() {
+						_, _ = c.Close(ctx)
+					}()
+
+					r, err := c.SendInput(ctx, "show version")
+					if err != nil {
+						errCh <- fmt.Errorf("operation %d send input: %w", operationID, err)
+
+						return
+					}
+
+					if r.Failed() {
+						errCh <- fmt.Errorf("operation %d returned failed result", operationID)
+					}
+				}(operationID)
 			}
 
 			wg.Wait()
+			close(errCh)
+
+			for err := range errCh {
+				t.Error(err)
+			}
 		})
 
 		time.Sleep(time.Second)
