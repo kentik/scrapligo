@@ -2,9 +2,16 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	mathrand "math/rand"
+	"net"
 	"os"
+	"os/exec"
+	"sync"
 	"testing"
+	"time"
 
 	scrapligocli "github.com/kentik/scrapligo/v2/cli"
 	scrapligoffi "github.com/kentik/scrapligo/v2/ffi"
@@ -15,6 +22,8 @@ import (
 const (
 	testHost = "localhost"
 )
+
+var errOperationFailed = errors.New("operation returned failed result")
 
 func TestMain(m *testing.M) {
 	scrapligotesthelper.Flags()
@@ -30,6 +39,184 @@ func TestMain(m *testing.M) {
 	_, _ = fmt.Fprintln(os.Stderr, "no memory leak(s) detected!")
 
 	os.Exit(exitCode)
+}
+
+func TestConcurrency(t *testing.T) { //nolint: gocognit
+	if raceEnabled {
+		t.Skip("skip concurrency stress test under -race")
+	}
+
+	tmpDir := t.TempDir()
+
+	dumboBin := fmt.Sprintf("%s/dumbo", tmpDir)
+
+	dumboBuild := exec.CommandContext( //nolint: gosec
+		t.Context(),
+		"go",
+		"build",
+		"-o",
+		dumboBin,
+		"main.go",
+	)
+
+	dumboBuild.Dir = "../build/dummy_ssh_server"
+
+	err := dumboBuild.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, transportName := range []string{
+		"bin",
+		"ssh2",
+	} {
+		testName := fmt.Sprintf("concurrency-%s", transportName)
+
+		t.Run(testName, func(t *testing.T) {
+			t.Logf("%s: starting", testName)
+			defer t.Logf("%s: complete", testName)
+
+			dumboCmd := exec.CommandContext(
+				t.Context(),
+				dumboBin,
+			)
+
+			err = dumboCmd.Start()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			waitForTestServer(t, "127.0.0.1:2222", 5*time.Second)
+
+			t.Cleanup(
+				func() {
+					t.Log("cleanup dummy server")
+
+					err = dumboCmd.Process.Kill()
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					_ = dumboCmd.Wait()
+				},
+			)
+
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+
+			wg := &sync.WaitGroup{}
+			slots := make(chan struct{}, 5)
+
+			opts := []scrapligooptions.Option{
+				scrapligooptions.WithPort(2222),
+				scrapligooptions.WithUsername("admin"),
+				scrapligooptions.WithPassword("password"),
+			}
+
+			if transportName == "bin" {
+				opts = append(
+					opts,
+					scrapligooptions.WithTransportBin(),
+					scrapligooptions.WithBinTransportExtraArgs("-F /dev/null"),
+				)
+			} else {
+				opts = append(
+					opts,
+					scrapligooptions.WithTransportSSH2(),
+				)
+			}
+
+			operationCount := 20
+			errCh := make(chan error, operationCount)
+
+			for operationID := range operationCount {
+				wg.Add(1)
+
+				go func(operationID int) {
+					defer wg.Done()
+
+					slots <- struct{}{}
+
+					defer func() {
+						<-slots
+					}()
+
+					// tiny sleep seems to make the test way more consistent -- at least locally
+					// on darwin i think we get starved for ptys and weird shit happens w/out
+					// this.
+					time.Sleep(
+						time.Duration(mathrand.Intn(100)) * time.Millisecond, //nolint:gosec
+					)
+
+					c, err := scrapligocli.NewCli( //nolint: contextcheck
+						"localhost",
+						opts...,
+					)
+					if err != nil {
+						errCh <- fmt.Errorf("operation %d new cli: %w", operationID, err)
+
+						return
+					}
+
+					_, err = c.Open(ctx)
+					if err != nil {
+						errCh <- fmt.Errorf("operation %d open: %w", operationID, err)
+
+						return
+					}
+
+					defer func() {
+						_, _ = c.Close(ctx)
+					}()
+
+					r, err := c.SendInput(ctx, "show version")
+					if err != nil {
+						errCh <- fmt.Errorf("operation %d send input: %w", operationID, err)
+
+						return
+					}
+
+					if r.Failed() {
+						errCh <- fmt.Errorf("operation %d: %w", operationID, errOperationFailed)
+					}
+				}(operationID)
+			}
+
+			wg.Wait()
+			close(errCh)
+
+			for err := range errCh {
+				t.Error(err)
+			}
+		})
+
+		time.Sleep(time.Second)
+	}
+}
+
+func waitForTestServer(t *testing.T, address string, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+
+	for {
+		conn, err := (&net.Dialer{Timeout: 100 * time.Millisecond}).DialContext(
+			context.Background(),
+			"tcp",
+			address,
+		)
+		if err == nil {
+			_ = conn.Close()
+
+			return
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for dummy server: %v", err)
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func getCli(t *testing.T, f string) *scrapligocli.Cli {
