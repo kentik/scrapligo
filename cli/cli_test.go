@@ -129,6 +129,7 @@ func TestConcurrency(t *testing.T) { //nolint: gocognit
 				wg.Go(
 					func() {
 						slots <- struct{}{}
+
 						defer func() {
 							<-slots
 						}()
@@ -180,7 +181,7 @@ func waitForTestServer(t *testing.T, address string, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 
 	for {
-		conn, err := net.DialTimeout("tcp", address, 100*time.Millisecond)
+		conn, err := (&net.Dialer{Timeout: 100 * time.Millisecond}).DialContext(context.Background(), "tcp", address)
 		if err == nil {
 			_ = conn.Close()
 
