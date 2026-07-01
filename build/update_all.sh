@@ -20,7 +20,6 @@ LATEST_LIBSCRAPLI_TAGS=(
             head -n 5
     )
 )
-
 CURRENT_LIBSCRAPLI_TAG=$(
     grep -Eo 'var LibScrapliVersion = "[^"]+"' constants/versions.go | cut -d '"' -f2
 )
@@ -37,9 +36,12 @@ LATEST_DEFINITION_TAGS=(
             head -n 5
     )
 )
-
 CURRENT_DEFINITION_TAG=$(
     grep -Eo 'var ScrapliDefinitionsVersion = "[^"]+"' constants/versions.go | cut -d '"' -f2
+)
+
+CURRENT_SCRAPLIGO_VERSION=$(
+    grep -Eo 'var Version = "[^"]+"' constants/versions.go | cut -d '"' -f2
 )
 
 echo "current libscrapli tag: $CURRENT_LIBSCRAPLI_TAG"

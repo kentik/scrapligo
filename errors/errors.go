@@ -38,7 +38,7 @@ const (
 
 // ScrapliError is the base error type used for all scrapli errors.
 type ScrapliError struct {
-	kind    ErrorKind
+	Kind    ErrorKind
 	Message string
 	Inner   error
 }
@@ -55,24 +55,9 @@ func (e *ScrapliError) Unwrap() error {
 	return e.Inner
 }
 
-// Kind returns the scrapli error category.
-func (e *ScrapliError) Kind() ErrorKind {
-	return e.kind
-}
-
-// IsKind reports whether err is a ScrapliError with the given kind.
-func IsKind(err error, kind ErrorKind) bool {
-	var se *ScrapliError
-	if !errors.As(err, &se) {
-		return false
-	}
-
-	return se.kind == kind
-}
-
 func newScrapliError(kind ErrorKind, message string, inner error) error {
 	return &ScrapliError{
-		kind:    kind,
+		Kind:    kind,
 		Message: message,
 		Inner:   inner,
 	}
@@ -100,5 +85,5 @@ func NewUtilError(message string, inner error) error {
 
 // NewMessagesError returns a "netconf" flavor ScrapliError, wrapping the ErrNoMessages error type.
 func NewMessagesError() error {
-	return newScrapliError(Netconf, "no more messages available", ErrNoMessages)
+	return newScrapliError(Netconf, "no messages", ErrNoMessages)
 }
