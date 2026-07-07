@@ -108,6 +108,10 @@ func (o *Options) Apply(optionsPtr uintptr) {
 	opts.loggerLevel = uintptr(unsafe.Pointer(unsafe.StringData(string(o.LoggerLevel))))
 	opts.loggerLevelLen = uintptr(len(o.LoggerLevel))
 
+	// default to no callback so a stale pointer from a previous apply can't leak into this
+	// options instance; only set it when a logger is actually configured.
+	opts.loggerCallback = 0
+
 	if o.Logger != nil {
 		if o.loggerCallbackSlot == -1 {
 			o.loggerCallbackSlot, o.loggerCallback = scrapligologging.AcquireLoggerCallback(
