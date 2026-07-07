@@ -195,6 +195,7 @@ func (c *Cli) Open(ctx context.Context) (*Result, error) {
 		}
 
 		c.ffiMap.Shared.Free(c.ptr)
+		c.options.ReleaseCallbackSlots()
 
 		c.ptr = 0
 	}()
@@ -249,6 +250,7 @@ func (c *Cli) Close(ctx context.Context) (*Result, error) {
 
 	defer func() {
 		c.ffiMap.Shared.Free(c.ptr)
+		c.options.ReleaseCallbackSlots()
 
 		c.ptr = 0
 	}()

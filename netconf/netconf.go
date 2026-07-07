@@ -122,6 +122,7 @@ func (n *Netconf) Open(ctx context.Context) (*Result, error) {
 		}
 
 		n.ffiMap.Shared.Free(n.ptr)
+		n.options.ReleaseCallbackSlots()
 
 		n.ptr = 0
 	}()
@@ -176,6 +177,7 @@ func (n *Netconf) Close(ctx context.Context, options ...Option) (*Result, error)
 
 	defer func() {
 		n.ffiMap.Shared.Free(n.ptr)
+		n.options.ReleaseCallbackSlots()
 
 		n.ptr = 0
 	}()
