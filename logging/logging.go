@@ -26,7 +26,7 @@ var (
 		}
 	}
 
-	loggerSlotsMu sync.Mutex     //nolint: gochecknoglobals
+	loggerSlotsMu sync.Mutex    //nolint: gochecknoglobals
 	loggerSlots   []*loggerSlot //nolint: gochecknoglobals
 )
 

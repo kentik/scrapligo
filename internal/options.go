@@ -27,10 +27,10 @@ const (
 var zero uint64 //nolint: gochecknoglobals
 
 var (
-	capabilitiesCallbackSlotsMu sync.Mutex                   //nolint: gochecknoglobals
+	capabilitiesCallbackSlotsMu sync.Mutex                  //nolint: gochecknoglobals
 	capabilitiesCallbackSlots   []*capabilitiesCallbackSlot //nolint: gochecknoglobals
 
-	recorderCallbackSlotsMu sync.Mutex               //nolint: gochecknoglobals
+	recorderCallbackSlotsMu sync.Mutex              //nolint: gochecknoglobals
 	recorderCallbackSlots   []*recorderCallbackSlot //nolint: gochecknoglobals
 )
 
@@ -212,8 +212,9 @@ func (o *NetconfOptions) apply(opts *driverOptions) {
 
 	if o.CapabilitiesCallback != nil {
 		if o.capabilitiesCallbackSlot == -1 {
-			o.capabilitiesCallbackSlot, o.capabilitiesCallback =
-				acquireCapabilitiesCallback(o.CapabilitiesCallback)
+			o.capabilitiesCallbackSlot, o.capabilitiesCallback = acquireCapabilitiesCallback(
+				o.CapabilitiesCallback,
+			)
 		}
 
 		opts.netconf.capabilitiesCallback = o.capabilitiesCallback
