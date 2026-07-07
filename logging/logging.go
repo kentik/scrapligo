@@ -26,8 +26,8 @@ var (
 		}
 	}
 
-	loggerSlotsMu sync.Mutex //nolint: gochecknoglobals
-	loggerSlots   []*loggerSlot
+	loggerSlotsMu sync.Mutex     //nolint: gochecknoglobals
+	loggerSlots   []*loggerSlot //nolint: gochecknoglobals
 )
 
 type loggerState struct {
@@ -42,7 +42,10 @@ type loggerSlot struct {
 }
 
 // AcquireLoggerCallback acquires a reusable callback slot for the given logger.
-func AcquireLoggerCallback(logger any, logLevel uint8) (int, uintptr) {
+func AcquireLoggerCallback( //nolint: nonamedreturns
+	logger any,
+	logLevel uint8,
+) (slotIdx int, callback uintptr) {
 	if logger == nil {
 		return -1, 0
 	}

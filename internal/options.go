@@ -27,11 +27,11 @@ const (
 var zero uint64 //nolint: gochecknoglobals
 
 var (
-	capabilitiesCallbackSlotsMu sync.Mutex //nolint: gochecknoglobals
-	capabilitiesCallbackSlots   []*capabilitiesCallbackSlot
+	capabilitiesCallbackSlotsMu sync.Mutex                   //nolint: gochecknoglobals
+	capabilitiesCallbackSlots   []*capabilitiesCallbackSlot //nolint: gochecknoglobals
 
-	recorderCallbackSlotsMu sync.Mutex //nolint: gochecknoglobals
-	recorderCallbackSlots   []*recorderCallbackSlot
+	recorderCallbackSlotsMu sync.Mutex               //nolint: gochecknoglobals
+	recorderCallbackSlots   []*recorderCallbackSlot //nolint: gochecknoglobals
 )
 
 type capabilitiesCallbackState struct {
@@ -107,6 +107,7 @@ func (o *Options) Apply(optionsPtr uintptr) {
 
 	opts.loggerLevel = uintptr(unsafe.Pointer(unsafe.StringData(string(o.LoggerLevel))))
 	opts.loggerLevelLen = uintptr(len(o.LoggerLevel))
+
 	if o.Logger != nil {
 		if o.loggerCallbackSlot == -1 {
 			o.loggerCallbackSlot, o.loggerCallback = scrapligologging.AcquireLoggerCallback(
@@ -298,7 +299,9 @@ func (o *SessionOptions) releaseRecorderCallbackSlot() {
 	o.recorderCallback = 0
 }
 
-func acquireCapabilitiesCallback(callback func(serverCapabilities *string) *string) (int, uintptr) {
+func acquireCapabilitiesCallback( //nolint: nonamedreturns
+	callback func(serverCapabilities *string) *string,
+) (slotIdx int, callbackPtr uintptr) {
 	capabilitiesCallbackSlotsMu.Lock()
 	defer capabilitiesCallbackSlotsMu.Unlock()
 
@@ -346,7 +349,9 @@ func releaseCapabilitiesCallbackSlot(slotIdx int) {
 	slot.inUse.Store(false)
 }
 
-func acquireRecorderCallback(callback func(buf *[]byte)) (int, uintptr) {
+func acquireRecorderCallback( //nolint: nonamedreturns
+	callback func(buf *[]byte),
+) (slotIdx int, callbackPtr uintptr) {
 	recorderCallbackSlotsMu.Lock()
 	defer recorderCallbackSlotsMu.Unlock()
 
