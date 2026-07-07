@@ -121,7 +121,10 @@ func (n *Netconf) Open(ctx context.Context) (*Result, error) {
 			return
 		}
 
-		n.ffiMap.Shared.Free(n.ptr)
+		if n.ptr != 0 {
+			n.ffiMap.Shared.Free(n.ptr)
+		}
+
 		n.options.ReleaseCallbackSlots()
 
 		n.ptr = 0
@@ -138,6 +141,8 @@ func (n *Netconf) Open(ctx context.Context) (*Result, error) {
 	)
 
 	if n.ptr == 0 {
+		cleanup = true
+
 		return nil, scrapligoerrors.NewFfiError("failed to allocate netconf", nil)
 	}
 

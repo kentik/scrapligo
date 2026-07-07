@@ -194,7 +194,10 @@ func (c *Cli) Open(ctx context.Context) (*Result, error) {
 			return
 		}
 
-		c.ffiMap.Shared.Free(c.ptr)
+		if c.ptr != 0 {
+			c.ffiMap.Shared.Free(c.ptr)
+		}
+
 		c.options.ReleaseCallbackSlots()
 
 		c.ptr = 0
@@ -211,6 +214,8 @@ func (c *Cli) Open(ctx context.Context) (*Result, error) {
 	)
 
 	if c.ptr == 0 {
+		cleanup = true
+
 		return nil, scrapligoerrors.NewFfiError("failed to allocate cli", nil)
 	}
 
