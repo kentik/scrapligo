@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -24,6 +26,34 @@ const (
 
 var zero uint64 //nolint: gochecknoglobals
 
+var (
+	capabilitiesCallbackSlotsMu sync.Mutex                  //nolint: gochecknoglobals
+	capabilitiesCallbackSlots   []*capabilitiesCallbackSlot //nolint: gochecknoglobals
+
+	recorderCallbackSlotsMu sync.Mutex              //nolint: gochecknoglobals
+	recorderCallbackSlots   []*recorderCallbackSlot //nolint: gochecknoglobals
+)
+
+type capabilitiesCallbackState struct {
+	callback func(serverCapabilities *string) *string
+}
+
+type capabilitiesCallbackSlot struct {
+	callback uintptr
+	inUse    atomic.Bool
+	state    atomic.Pointer[capabilitiesCallbackState]
+}
+
+type recorderCallbackState struct {
+	callback func(buf *[]byte)
+}
+
+type recorderCallbackSlot struct {
+	callback uintptr
+	inUse    atomic.Bool
+	state    atomic.Pointer[recorderCallbackState]
+}
+
 // Options holds options for all driver kinds (cli and netconf).
 type Options struct {
 	Cli     CliOptions
@@ -39,6 +69,9 @@ type Options struct {
 	Session   SessionOptions
 	Auth      AuthOptions
 	Transport TransportOptions
+
+	loggerCallbackSlot int
+	loggerCallback     uintptr
 }
 
 // NewOptions returns a new options object.
@@ -53,10 +86,13 @@ func NewOptions() *Options {
 			NormalizeLineFeeds:          true,
 			NormalizeTrailingWhitespace: true,
 		},
-		Netconf: NetconfOptions{},
+		Netconf: NetconfOptions{capabilitiesCallbackSlot: -1},
+		Session: SessionOptions{recorderCallbackSlot: -1},
 		Auth: AuthOptions{
 			LookupMap: make(map[string]string),
 		},
+		loggerCallbackSlot: -1,
+		loggerCallback:     0,
 	}
 }
 
@@ -71,10 +107,21 @@ func (o *Options) Apply(optionsPtr uintptr) {
 
 	opts.loggerLevel = uintptr(unsafe.Pointer(unsafe.StringData(string(o.LoggerLevel))))
 	opts.loggerLevelLen = uintptr(len(o.LoggerLevel))
-	opts.loggerCallback = scrapligologging.LoggerToLoggerCallback(
-		o.Logger,
-		uint8(scrapligologging.IntFromLevel(o.LoggerLevel)),
-	)
+
+	// default to no callback so a stale pointer from a previous apply can't leak into this
+	// options instance; only set it when a logger is actually configured.
+	opts.loggerCallback = 0
+
+	if o.Logger != nil {
+		if o.loggerCallbackSlot == -1 {
+			o.loggerCallbackSlot, o.loggerCallback = scrapligologging.AcquireLoggerCallback(
+				o.Logger,
+				uint8(scrapligologging.IntFromLevel(o.LoggerLevel)),
+			)
+		}
+
+		opts.loggerCallback = o.loggerCallback
+	}
 
 	opts.port = &o.Port
 
@@ -95,6 +142,18 @@ func (o *Options) Apply(optionsPtr uintptr) {
 	case TransportKindTest:
 		o.Transport.Test.apply(opts)
 	}
+}
+
+// ReleaseCallbackSlots releases any acquired callback slots for this options object.
+func (o *Options) ReleaseCallbackSlots() {
+	if o.loggerCallbackSlot != -1 {
+		scrapligologging.ReleaseLoggerCallbackSlot(o.loggerCallbackSlot)
+		o.loggerCallbackSlot = -1
+		o.loggerCallback = 0
+	}
+
+	o.Netconf.releaseCapabilitiesCallbackSlot()
+	o.Session.releaseRecorderCallbackSlot()
 }
 
 // CliOptions holds cli specific options.
@@ -133,6 +192,9 @@ type NetconfOptions struct {
 	PreferredVersion      string
 	MessagePollIntervalNS uint64
 	CapabilitiesCallback  func(serverCapabilities *string) *string
+
+	capabilitiesCallbackSlot int
+	capabilitiesCallback     uintptr
 }
 
 func (o *NetconfOptions) apply(opts *driverOptions) {
@@ -153,8 +215,24 @@ func (o *NetconfOptions) apply(opts *driverOptions) {
 	}
 
 	if o.CapabilitiesCallback != nil {
-		opts.netconf.capabilitiesCallback = purego.NewCallback(o.CapabilitiesCallback)
+		if o.capabilitiesCallbackSlot == -1 {
+			o.capabilitiesCallbackSlot, o.capabilitiesCallback = acquireCapabilitiesCallback(
+				o.CapabilitiesCallback,
+			)
+		}
+
+		opts.netconf.capabilitiesCallback = o.capabilitiesCallback
 	}
+}
+
+func (o *NetconfOptions) releaseCapabilitiesCallbackSlot() {
+	if o.capabilitiesCallbackSlot == -1 {
+		return
+	}
+
+	releaseCapabilitiesCallbackSlot(o.capabilitiesCallbackSlot)
+	o.capabilitiesCallbackSlot = -1
+	o.capabilitiesCallback = 0
 }
 
 // SessionOptions holds options specific to the zig "Session" that lives in a driver.
@@ -169,6 +247,9 @@ type SessionOptions struct {
 
 	RecorderPath     string
 	RecorderCallback func(buf *[]byte)
+
+	recorderCallbackSlot int
+	recorderCallback     uintptr
 }
 
 func (o *SessionOptions) apply(opts *driverOptions) {
@@ -205,8 +286,122 @@ func (o *SessionOptions) apply(opts *driverOptions) {
 		opts.session.recordDestination = uintptr(unsafe.Pointer(unsafe.StringData(o.RecorderPath)))
 		opts.session.recordDestinationLen = uintptr(len(o.RecorderPath))
 	} else if o.RecorderCallback != nil {
-		opts.session.recorderCallback = purego.NewCallback(o.RecorderCallback)
+		if o.recorderCallbackSlot == -1 {
+			o.recorderCallbackSlot, o.recorderCallback = acquireRecorderCallback(o.RecorderCallback)
+		}
+
+		opts.session.recorderCallback = o.recorderCallback
 	}
+}
+
+func (o *SessionOptions) releaseRecorderCallbackSlot() {
+	if o.recorderCallbackSlot == -1 {
+		return
+	}
+
+	releaseRecorderCallbackSlot(o.recorderCallbackSlot)
+	o.recorderCallbackSlot = -1
+	o.recorderCallback = 0
+}
+
+func acquireCapabilitiesCallback( //nolint: nonamedreturns
+	callback func(serverCapabilities *string) *string,
+) (slotIdx int, callbackPtr uintptr) {
+	capabilitiesCallbackSlotsMu.Lock()
+	defer capabilitiesCallbackSlotsMu.Unlock()
+
+	for idx, slot := range capabilitiesCallbackSlots {
+		if !slot.inUse.CompareAndSwap(false, true) {
+			continue
+		}
+
+		slot.state.Store(&capabilitiesCallbackState{callback: callback})
+
+		return idx, slot.callback
+	}
+
+	slot := &capabilitiesCallbackSlot{}
+	slot.inUse.Store(true)
+	slot.state.Store(&capabilitiesCallbackState{callback: callback})
+	slot.callback = purego.NewCallback(func(serverCapabilities *string) *string {
+		state := slot.state.Load()
+		if state == nil || state.callback == nil {
+			return nil
+		}
+
+		return state.callback(serverCapabilities)
+	})
+
+	capabilitiesCallbackSlots = append(capabilitiesCallbackSlots, slot)
+
+	return len(capabilitiesCallbackSlots) - 1, slot.callback
+}
+
+func releaseCapabilitiesCallbackSlot(slotIdx int) {
+	if slotIdx < 0 {
+		return
+	}
+
+	capabilitiesCallbackSlotsMu.Lock()
+	defer capabilitiesCallbackSlotsMu.Unlock()
+
+	if slotIdx >= len(capabilitiesCallbackSlots) {
+		return
+	}
+
+	slot := capabilitiesCallbackSlots[slotIdx]
+	slot.state.Store(nil)
+	slot.inUse.Store(false)
+}
+
+func acquireRecorderCallback( //nolint: nonamedreturns
+	callback func(buf *[]byte),
+) (slotIdx int, callbackPtr uintptr) {
+	recorderCallbackSlotsMu.Lock()
+	defer recorderCallbackSlotsMu.Unlock()
+
+	for idx, slot := range recorderCallbackSlots {
+		if !slot.inUse.CompareAndSwap(false, true) {
+			continue
+		}
+
+		slot.state.Store(&recorderCallbackState{callback: callback})
+
+		return idx, slot.callback
+	}
+
+	slot := &recorderCallbackSlot{}
+	slot.inUse.Store(true)
+	slot.state.Store(&recorderCallbackState{callback: callback})
+	slot.callback = purego.NewCallback(func(buf *[]byte) {
+		state := slot.state.Load()
+		if state == nil || state.callback == nil {
+			return
+		}
+
+		state.callback(buf)
+	})
+
+	recorderCallbackSlots = append(recorderCallbackSlots, slot)
+
+	return len(recorderCallbackSlots) - 1, slot.callback
+}
+
+func releaseRecorderCallbackSlot(slotIdx int) {
+	if slotIdx < 0 {
+		return
+	}
+
+	recorderCallbackSlotsMu.Lock()
+	defer recorderCallbackSlotsMu.Unlock()
+
+	if slotIdx >= len(recorderCallbackSlots) {
+		return
+	}
+
+	slot := recorderCallbackSlots[slotIdx]
+	slot.state.Store(nil)
+	slot.inUse.Store(false)
 }
 
 // AuthOptions holds auth related options for driveres.
