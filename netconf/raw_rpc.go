@@ -2,10 +2,8 @@ package netconf
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
-	scrapligoconstants "github.com/kentik/scrapligo/v2/constants"
 	scrapligoerrors "github.com/kentik/scrapligo/v2/errors"
 )
 
@@ -24,14 +22,26 @@ type rawRPCOptions struct {
 	extraNamespaces     [][2]string
 }
 
-func (o *rawRPCOptions) extraNamespacesToFFI() string {
-	namespaces := make([]string, len(o.extraNamespaces))
+func (o *rawRPCOptions) extraNamespacesToFFI() ([]byte, []uint64) { //nolint: gocritic
+	namespaces := make([]string, len(o.extraNamespaces)*2) //nolint: mnd
 
-	for i, ns := range o.extraNamespaces {
-		namespaces[i] = fmt.Sprintf("%s::%s", ns[0], ns[1])
+	namespaceLens := make([]uint64, len(o.extraNamespaces)*2) //nolint: mnd
+
+	var idx int
+
+	for _, ns := range o.extraNamespaces {
+		namespaces[idx] = ns[0]
+		namespaceLens[idx] = uint64(len(ns[0]))
+
+		idx++
+
+		namespaces[idx] = ns[1]
+		namespaceLens[idx] = uint64(len(ns[1]))
+
+		idx++
 	}
 
-	return strings.Join(namespaces, scrapligoconstants.LibScrapliDelimiter)
+	return []byte(strings.Join(namespaces, "")), namespaceLens
 }
 
 // RawRPC executes a user provided "raw" rpc.
@@ -50,13 +60,16 @@ func (n *Netconf) RawRPC(
 
 	loadedOptions := newRawRPCOptions(options...)
 
+	extraNamespaces, extraNamespacesLens := loadedOptions.extraNamespacesToFFI()
+
 	err := n.ffiMap.Netconf.RawRPC(
 		n.ptr,
 		&operationID,
 		&cancel,
 		payload,
 		loadedOptions.baseNamespacePrefix,
-		loadedOptions.extraNamespacesToFFI(),
+		&extraNamespaces,
+		&extraNamespacesLens,
 	)
 	if err != nil {
 		return nil, err

@@ -2,11 +2,11 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	scrapligoassets "github.com/kentik/scrapligo/v2/assets"
 	scrapligoclidefinitionoptions "github.com/kentik/scrapligo/v2/cli/definitionoptions"
@@ -16,8 +16,21 @@ import (
 	scrapligointernal "github.com/kentik/scrapligo/v2/internal"
 	scrapligologging "github.com/kentik/scrapligo/v2/logging"
 	scrapligooptions "github.com/kentik/scrapligo/v2/options"
-	"golang.org/x/sys/unix"
 )
+
+func newCloseOptions(options ...Option) *closeOptions {
+	o := &closeOptions{}
+
+	for _, opt := range options {
+		opt(o)
+	}
+
+	return o
+}
+
+type closeOptions struct {
+	force bool
+}
 
 func loadDefinition(o *scrapligointernal.Options) error {
 	definitionFileOrNameString := o.Cli.DefinitionFileOrName
@@ -71,12 +84,13 @@ func loadDefinition(o *scrapligointernal.Options) error {
 // Cli is an object representing a connection to a device of some sort -- this object wraps the
 // underlying zig driver (created via libscrapli).
 type Cli struct {
-	ptr     uintptr
-	pollFd  int
-	ffiMap  *scrapligoffi.Mapping
-	host    string
-	options *scrapligointernal.Options
-	l       *scrapligologging.AnyLogger
+	ptr      uintptr
+	userData uintptr
+	pollFd   int
+	ffiMap   *scrapligoffi.Mapping
+	host     string
+	options  *scrapligointernal.Options
+	l        *scrapligologging.AnyLogger
 }
 
 // NewCli returns a new instance of Cli setup with the given options.
@@ -90,9 +104,10 @@ func NewCli(
 	}
 
 	c := &Cli{
-		ffiMap:  ffiMap,
-		host:    host,
-		options: scrapligointernal.NewOptions(),
+		userData: scrapligointernal.GetUserDataDispatcherr().Register(),
+		ffiMap:   ffiMap,
+		host:     host,
+		options:  scrapligointernal.NewOptions(),
 	}
 
 	for _, opt := range opts {
@@ -156,11 +171,14 @@ func (c *Cli) GetOptions() (string, error) {
 	optionsPtr := c.ffiMap.Shared.AllocDriverOptions()
 	defer c.ffiMap.Shared.FreeDriverOptions(optionsPtr)
 
-	c.options.Apply(optionsPtr)
+	err := c.options.Apply(c.userData, optionsPtr)
+	if err != nil {
+		return "", err
+	}
 
 	var optionsSize uintptr
 
-	err := c.ffiMap.Shared.FetchOptionsSize(
+	err = c.ffiMap.Shared.FetchOptionsSize(
 		optionsPtr,
 		&optionsSize,
 	)
@@ -187,18 +205,19 @@ func (c *Cli) GetOptions() (string, error) {
 func (c *Cli) Open(ctx context.Context) (*Result, error) {
 	// ensure we dealloc if something happens, otherwise users calls to defer close would not be
 	// super handy
-	cleanup := false
+	cleanup := true
 
 	defer func() {
 		if !cleanup {
 			return
 		}
 
+		scrapligointernal.GetLoggerDispatcher().Deregister(c.userData)
+		scrapligointernal.GetRecorderDispatcher().Deregister(c.userData)
+
 		if c.ptr != 0 {
 			c.ffiMap.Shared.Free(c.ptr)
 		}
-
-		c.options.ReleaseCallbackSlots()
 
 		c.ptr = 0
 	}()
@@ -206,7 +225,10 @@ func (c *Cli) Open(ctx context.Context) (*Result, error) {
 	optionsPtr := c.ffiMap.Shared.AllocDriverOptions()
 	defer c.ffiMap.Shared.FreeDriverOptions(optionsPtr)
 
-	c.options.Apply(optionsPtr)
+	err := c.options.Apply(c.userData, optionsPtr)
+	if err != nil {
+		return nil, err
+	}
 
 	c.ptr = c.ffiMap.Cli.Alloc(
 		c.host,
@@ -221,8 +243,6 @@ func (c *Cli) Open(ctx context.Context) (*Result, error) {
 
 	c.pollFd = int(c.ffiMap.Shared.GetPollFd(c.ptr))
 	if c.pollFd == 0 {
-		cleanup = true
-
 		return nil, scrapligoerrors.NewFfiError("failed to allocate cli", nil)
 	}
 
@@ -230,32 +250,32 @@ func (c *Cli) Open(ctx context.Context) (*Result, error) {
 
 	var operationID uint32
 
-	err := c.ffiMap.Cli.Open(c.ptr, &operationID, &cancel)
+	err = c.ffiMap.Cli.Open(c.ptr, &operationID, &cancel)
 	if err != nil {
-		cleanup = true
-
 		return nil, err
 	}
 
 	result, err := c.getResult(ctx, &cancel, operationID)
 	if err != nil {
-		cleanup = true
-
 		return nil, err
 	}
+
+	cleanup = false
 
 	return result, nil
 }
 
 // Close closes the driver object. This also deallocates the underlying (zig) driver object.
-func (c *Cli) Close(ctx context.Context) (*Result, error) {
+func (c *Cli) Close(ctx context.Context, options ...Option) (*Result, error) {
 	if c.ptr == 0 {
 		return nil, scrapligoerrors.NewFfiError("driver pointer nil", nil)
 	}
 
 	defer func() {
+		scrapligointernal.GetLoggerDispatcher().Deregister(c.userData)
+		scrapligointernal.GetRecorderDispatcher().Deregister(c.userData)
+
 		c.ffiMap.Shared.Free(c.ptr)
-		c.options.ReleaseCallbackSlots()
 
 		c.ptr = 0
 	}()
@@ -264,7 +284,9 @@ func (c *Cli) Close(ctx context.Context) (*Result, error) {
 
 	var operationID uint32
 
-	err := c.ffiMap.Cli.Close(c.ptr, &operationID, &cancel)
+	loadedOptions := newCloseOptions(options...)
+
+	err := c.ffiMap.Cli.Close(c.ptr, &operationID, &cancel, loadedOptions.force)
 	if err != nil {
 		return nil, err
 	}
@@ -279,12 +301,12 @@ func (c *Cli) ReplaceDefinition(definitionFileOrString string) error {
 		return scrapligoerrors.NewFfiError("driver pointer nil", nil)
 	}
 
-	c.options.Cli.DefinitionFileOrName = definitionFileOrString
-
 	err := loadDefinition(c.options)
 	if err != nil {
 		return err
 	}
+
+	c.options.Cli.DefinitionFileOrName = definitionFileOrString
 
 	return c.ffiMap.Cli.ReplaceDefinition(c.ptr, c.options.Cli.DefinitionString)
 }
@@ -299,12 +321,17 @@ func (c *Cli) getResult(
 
 	var operationCount uint32
 
+	cancelLock := &sync.Mutex{}
+
 	// so in go flavor we actually use ctx to cause libscrapli to timeout vs python where we rely on
 	// the timeouts in libscrapli itself. so in this case we need to ensure that we do not block the
 	// context so it can properly cancel on timeout/cancellation...
 	go func() {
 		select {
 		case <-ctx.Done():
+			cancelLock.Lock()
+			defer cancelLock.Unlock()
+
 			*cancel = true
 
 			return
@@ -313,49 +340,21 @@ func (c *Cli) getResult(
 		}
 	}()
 
-	var n int
-
-	pollFds := []unix.PollFd{{Fd: int32(c.pollFd), Events: unix.POLLIN}} //nolint: gosec
-
-	for {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-
-		pollFds[0].Revents = 0
-
-		var err error
-
-		n, err = unix.Poll(pollFds, scrapligoconstants.ReadyFDPollTimeoutMs)
-		if err != nil {
-			if errors.Is(err, unix.EINTR) {
-				// python automagically handles interrupts i guess go doesnt, so just act like
-				// we do on the python side when polling the wakeup fd
-				continue
-			}
-
-			return nil, scrapligoerrors.NewFfiError("waiting on operation ready signal", err)
-		}
-
-		if n > 0 {
-			if pollFds[0].Revents&unix.POLLNVAL != 0 {
-				return nil, scrapligoerrors.NewFfiError(
-					"waiting on operation ready signal",
-					unix.EBADF,
-				)
-			}
-
-			break
-		}
+	err := scrapligointernal.GetResultWaitWakeup(ctx, c.pollFd, cancelLock, cancel, operationID)
+	if err != nil {
+		return nil, err
 	}
 
-	out := make([]byte, n)
+	var (
+		inputsSize                 uintptr
+		resultsRawSize             uintptr
+		resultsSize                uintptr
+		resultsFailedIndicatorSize uintptr
+		errSize                    uintptr
+		lastErrStrSize             uintptr
+	)
 
-	_, _ = unix.Read(c.pollFd, out)
-
-	var inputsSize, resultsRawSize, resultsSize, resultsFailedIndicatorSize, errSize uintptr
-
-	err := c.ffiMap.Cli.FetchOperationSizes(
+	err = c.ffiMap.Cli.FetchOperationSizes(
 		c.ptr,
 		operationID,
 		&operationCount,
@@ -364,6 +363,7 @@ func (c *Cli) getResult(
 		&resultsSize,
 		&resultsFailedIndicatorSize,
 		&errSize,
+		&lastErrStrSize,
 	)
 	if err != nil {
 		return nil, err
@@ -375,13 +375,21 @@ func (c *Cli) getResult(
 
 	inputs := make([]byte, inputsSize)
 
-	resultsRaw := make([]byte, resultsRawSize)
+	inputLens := make([]uint64, operationCount)
+
+	resultRawJournals := make([]byte, resultsRawSize)
+
+	resultRawJournalLens := make([]uint64, operationCount)
 
 	results := make([]byte, resultsSize)
+
+	resultLens := make([]uint64, operationCount)
 
 	resultsFailedWhenIndicator := make([]byte, resultsFailedIndicatorSize)
 
 	errString := make([]byte, errSize)
+
+	lastErrString := make([]byte, lastErrStrSize)
 
 	err = c.ffiMap.Cli.FetchOperation(
 		c.ptr,
@@ -389,10 +397,14 @@ func (c *Cli) getResult(
 		&resultStartTime,
 		&splits,
 		&inputs,
-		&resultsRaw,
+		&inputLens,
+		&resultRawJournals,
+		&resultRawJournalLens,
 		&results,
+		&resultLens,
 		&resultsFailedWhenIndicator,
 		&errString,
+		&lastErrString,
 	)
 	if err != nil {
 		return nil, err
@@ -401,17 +413,26 @@ func (c *Cli) getResult(
 	if errSize != 0 {
 		// always wrap the context error (even if nil) so we catch cancels/deadline exceeded and
 		// users can errors.Is with that
-		return nil, scrapligoerrors.NewFfiError(string(errString), ctx.Err())
+		outErrMsg := string(errString)
+
+		if lastErrStrSize > 0 {
+			outErrMsg += fmt.Sprintf(": %s", string(lastErrString))
+		}
+
+		return nil, scrapligoerrors.NewFfiError(outErrMsg, ctx.Err())
 	}
 
-	return NewResult(
+	return newResult(
 		c.host,
 		c.options.Port,
-		inputs,
 		resultStartTime,
 		splits,
-		resultsRaw,
+		inputs,
+		inputLens,
+		resultRawJournals,
+		resultRawJournalLens,
 		results,
+		resultLens,
 		resultsFailedWhenIndicator,
 	), nil
 }

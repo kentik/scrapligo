@@ -2,15 +2,14 @@ package netconf
 
 import (
 	"context"
-	"errors"
+	"fmt"
+	"sync"
 
-	scrapligoconstants "github.com/kentik/scrapligo/v2/constants"
 	scrapligoerrors "github.com/kentik/scrapligo/v2/errors"
 	scrapligoffi "github.com/kentik/scrapligo/v2/ffi"
 	scrapligointernal "github.com/kentik/scrapligo/v2/internal"
 	scrapligologging "github.com/kentik/scrapligo/v2/logging"
 	scrapligooptions "github.com/kentik/scrapligo/v2/options"
-	"golang.org/x/sys/unix"
 )
 
 func newCloseOptions(options ...Option) *closeOptions {
@@ -30,12 +29,13 @@ type closeOptions struct {
 // Netconf is an object representing a netconf connection to a device of some sort -- this object
 // wraps the underlying zig (netconf) driver (created via libscrapli).
 type Netconf struct {
-	ptr     uintptr
-	pollFd  int
-	ffiMap  *scrapligoffi.Mapping
-	host    string
-	options *scrapligointernal.Options
-	l       *scrapligologging.AnyLogger
+	ptr      uintptr
+	userData uintptr
+	pollFd   int
+	ffiMap   *scrapligoffi.Mapping
+	host     string
+	options  *scrapligointernal.Options
+	l        *scrapligologging.AnyLogger
 }
 
 // NewNetconf returns a new instance of Netconf setup with the given options.
@@ -49,9 +49,10 @@ func NewNetconf(
 	}
 
 	n := &Netconf{
-		ffiMap:  ffiMap,
-		host:    host,
-		options: scrapligointernal.NewOptions(),
+		userData: scrapligointernal.GetUserDataDispatcherr().Register(),
+		ffiMap:   ffiMap,
+		host:     host,
+		options:  scrapligointernal.NewOptions(),
 	}
 
 	for _, opt := range opts {
@@ -83,11 +84,14 @@ func (n *Netconf) GetOptions() (string, error) {
 	optionsPtr := n.ffiMap.Shared.AllocDriverOptions()
 	defer n.ffiMap.Shared.FreeDriverOptions(optionsPtr)
 
-	n.options.Apply(optionsPtr)
+	err := n.options.Apply(n.userData, optionsPtr)
+	if err != nil {
+		return "", err
+	}
 
 	var optionsSize uintptr
 
-	err := n.ffiMap.Shared.FetchOptionsSize(
+	err = n.ffiMap.Shared.FetchOptionsSize(
 		optionsPtr,
 		&optionsSize,
 	)
@@ -114,18 +118,20 @@ func (n *Netconf) GetOptions() (string, error) {
 func (n *Netconf) Open(ctx context.Context) (*Result, error) {
 	// ensure we dealloc if something happens, otherwise users calls to defer close would not be
 	// super handy
-	cleanup := false
+	cleanup := true
 
 	defer func() {
 		if !cleanup {
 			return
 		}
 
+		scrapligointernal.GetLoggerDispatcher().Deregister(n.userData)
+		scrapligointernal.GetRecorderDispatcher().Deregister(n.userData)
+		scrapligointernal.GetNetconfCapabiltiesDispatcher().Deregister(n.userData)
+
 		if n.ptr != 0 {
 			n.ffiMap.Shared.Free(n.ptr)
 		}
-
-		n.options.ReleaseCallbackSlots()
 
 		n.ptr = 0
 	}()
@@ -133,7 +139,10 @@ func (n *Netconf) Open(ctx context.Context) (*Result, error) {
 	optionsPtr := n.ffiMap.Shared.AllocDriverOptions()
 	defer n.ffiMap.Shared.FreeDriverOptions(optionsPtr)
 
-	n.options.Apply(optionsPtr)
+	err := n.options.Apply(n.userData, optionsPtr)
+	if err != nil {
+		return nil, err
+	}
 
 	n.ptr = n.ffiMap.Netconf.Alloc(
 		n.host,
@@ -148,8 +157,6 @@ func (n *Netconf) Open(ctx context.Context) (*Result, error) {
 
 	n.pollFd = int(n.ffiMap.Shared.GetPollFd(n.ptr))
 	if n.pollFd == 0 {
-		cleanup = true
-
 		return nil, scrapligoerrors.NewFfiError("failed to allocate netconf", nil)
 	}
 
@@ -157,19 +164,17 @@ func (n *Netconf) Open(ctx context.Context) (*Result, error) {
 
 	var operationID uint32
 
-	err := n.ffiMap.Netconf.Open(n.ptr, &operationID, &cancel)
+	err = n.ffiMap.Netconf.Open(n.ptr, &operationID, &cancel)
 	if err != nil {
-		cleanup = true
-
 		return nil, err
 	}
 
 	result, err := n.getResult(ctx, &cancel, operationID)
 	if err != nil {
-		cleanup = true
-
 		return nil, err
 	}
+
+	cleanup = false
 
 	return result, nil
 }
@@ -181,8 +186,11 @@ func (n *Netconf) Close(ctx context.Context, options ...Option) (*Result, error)
 	}
 
 	defer func() {
+		scrapligointernal.GetLoggerDispatcher().Deregister(n.userData)
+		scrapligointernal.GetRecorderDispatcher().Deregister(n.userData)
+		scrapligointernal.GetNetconfCapabiltiesDispatcher().Deregister(n.userData)
+
 		n.ffiMap.Shared.Free(n.ptr)
-		n.options.ReleaseCallbackSlots()
 
 		n.ptr = 0
 	}()
@@ -308,9 +316,14 @@ func (n *Netconf) getResult(
 	done := make(chan struct{}, 1)
 	defer close(done)
 
+	cancelLock := &sync.Mutex{}
+
 	go func() {
 		select {
 		case <-ctx.Done():
+			cancelLock.Lock()
+			defer cancelLock.Unlock()
+
 			*cancel = true
 
 			return
@@ -319,57 +332,31 @@ func (n *Netconf) getResult(
 		}
 	}()
 
-	var _n int
-
-	pollFds := []unix.PollFd{{Fd: int32(n.pollFd), Events: unix.POLLIN}} //nolint: gosec
-
-	for {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-
-		pollFds[0].Revents = 0
-
-		var err error
-
-		_n, err = unix.Poll(pollFds, scrapligoconstants.ReadyFDPollTimeoutMs)
-		if err != nil {
-			if errors.Is(err, unix.EINTR) {
-				// python automagically handles interrupts i guess go doesnt, so just act like
-				// we do on the python side when polling the wakeup fd
-				continue
-			}
-
-			return nil, scrapligoerrors.NewFfiError("waiting on operation ready signal", err)
-		}
-
-		if _n > 0 {
-			if pollFds[0].Revents&unix.POLLNVAL != 0 {
-				return nil, scrapligoerrors.NewFfiError(
-					"waiting on operation ready signal",
-					unix.EBADF,
-				)
-			}
-
-			break
-		}
+	err := scrapligointernal.GetResultWaitWakeup(ctx, n.pollFd, cancelLock, cancel, operationID)
+	if err != nil {
+		return nil, err
 	}
 
-	out := make([]byte, _n)
+	var (
+		inputSize            uintptr
+		resultRawJournalSize uintptr
+		resultSize           uintptr
+		rpcWarningsSize      uintptr
+		rpcErrorsSize        uintptr
+		errSize              uintptr
+		lastErrStrSize       uintptr
+	)
 
-	_, _ = unix.Read(n.pollFd, out)
-
-	var inputSize, resultRawSize, resultSize, rpcWarningsSize, rpcErrorsSize, errSize uintptr
-
-	err := n.ffiMap.Netconf.FetchOperationSizes(
+	err = n.ffiMap.Netconf.FetchOperationSizes(
 		n.ptr,
 		operationID,
 		&inputSize,
-		&resultRawSize,
+		&resultRawJournalSize,
 		&resultSize,
 		&rpcWarningsSize,
 		&rpcErrorsSize,
 		&errSize,
+		&lastErrStrSize,
 	)
 	if err != nil {
 		return nil, err
@@ -379,7 +366,7 @@ func (n *Netconf) getResult(
 
 	input := make([]byte, inputSize)
 
-	resultRaw := make([]byte, resultRawSize)
+	resultRawJournal := make([]byte, resultRawJournalSize)
 
 	result := make([]byte, resultSize)
 
@@ -389,33 +376,42 @@ func (n *Netconf) getResult(
 
 	errString := make([]byte, errSize)
 
+	lastErrString := make([]byte, lastErrStrSize)
+
 	err = n.ffiMap.Netconf.FetchOperation(
 		n.ptr,
 		operationID,
 		&resultStartTime,
 		&resultEndTime,
 		&input,
-		&resultRaw,
+		&resultRawJournal,
 		&result,
 		&rpcWarnings,
 		&rpcErrors,
 		&errString,
+		&lastErrString,
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	if errSize != 0 {
-		return nil, scrapligoerrors.NewFfiError(string(errString), ctx.Err())
+		outErrMsg := string(errString)
+
+		if lastErrStrSize > 0 {
+			outErrMsg += fmt.Sprintf(": %s", string(lastErrString))
+		}
+
+		return nil, scrapligoerrors.NewFfiError(outErrMsg, ctx.Err())
 	}
 
-	return NewResult(
+	return newResult(
 		string(input),
 		n.host,
 		n.options.Port,
 		resultStartTime,
 		resultEndTime,
-		resultRaw,
+		resultRawJournal,
 		string(result),
 		rpcWarnings,
 		rpcErrors,

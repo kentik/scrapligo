@@ -70,6 +70,46 @@ func WithOperationMaxSearchDepth(i uint64) Option {
 	}
 }
 
+// WithScratchInitialSize sets the initial size of the "scratch" bufs that the session holds.
+// Almost certainly you can leave this alone unless you have some specific needs.
+func WithScratchInitialSize(i uint64) Option {
+	return func(o *scrapligointernal.Options) error {
+		o.Session.ScratchInitialSize = &i
+
+		return nil
+	}
+}
+
+// WithScratchRetainMax sets the max size (to retain) of the "scratch" bufs -- dont mess with this
+// unless you have some specific needs.
+func WithScratchRetainMax(i uint64) Option {
+	return func(o *scrapligointernal.Options) error {
+		o.Session.ScratchRetainMax = &i
+
+		return nil
+	}
+}
+
+// WithNoNormalizeLineFeeds tells libscrapli to *not* normalize \r\n -> \n when fetching the
+// (processed) result from cli operations. Ignored for netconf.
+func WithNoNormalizeLineFeeds() Option {
+	return func(o *scrapligointernal.Options) error {
+		o.Session.NormalizeLineFeeds = false
+
+		return nil
+	}
+}
+
+// WithNoNormalizeTrailingWhitespace tells libscrapli to *not* clean/normalize (remove) trailing
+// whitespace when fetching the (processed) result from cli operations. Ignored for netconf.
+func WithNoNormalizeTrailingWhitespace() Option {
+	return func(o *scrapligointernal.Options) error {
+		o.Session.NormalizeTrailingWhitespace = false
+
+		return nil
+	}
+}
+
 // WithSessionRecorderPath sets the output path for a recorder/writer for the session.
 func WithSessionRecorderPath(s string) Option {
 	return func(o *scrapligointernal.Options) error {
@@ -80,7 +120,7 @@ func WithSessionRecorderPath(s string) Option {
 }
 
 // WithSessionRecorderCallback sets the callback for a recorder/writer for the session.
-func WithSessionRecorderCallback(f func(s *[]byte)) Option {
+func WithSessionRecorderCallback(f func(s string)) Option {
 	return func(o *scrapligointernal.Options) error {
 		o.Session.RecorderCallback = f
 
