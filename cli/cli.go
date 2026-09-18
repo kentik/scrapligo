@@ -301,12 +301,12 @@ func (c *Cli) ReplaceDefinition(definitionFileOrString string) error {
 		return scrapligoerrors.NewFfiError("driver pointer nil", nil)
 	}
 
+	c.options.Cli.DefinitionFileOrName = definitionFileOrString
+
 	err := loadDefinition(c.options)
 	if err != nil {
 		return err
 	}
-
-	c.options.Cli.DefinitionFileOrName = definitionFileOrString
 
 	return c.ffiMap.Cli.ReplaceDefinition(c.ptr, c.options.Cli.DefinitionString)
 }

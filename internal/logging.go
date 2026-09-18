@@ -145,14 +145,18 @@ func (l *loggerDispatcher) GetLoggerCallback() uintptr {
 
 func (l *loggerDispatcher) log(userData uintptr, level uint8, message *string) {
 	l.lock.RLock()
-	defer l.lock.RUnlock()
-
 	lf, ok := l.loggers[userData]
+	l.lock.RUnlock()
+
 	if !ok {
 		return
 	}
 
-	msg := strings.Clone(*message)
+	var msg string
+
+	if message != nil {
+		msg = strings.Clone(*message)
+	}
 
 	lf(level, msg)
 }

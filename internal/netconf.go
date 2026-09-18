@@ -67,16 +67,20 @@ func (n *netconfCapabilitiesDispatcher) GetCapabilitiesCallback() uintptr {
 
 func (n *netconfCapabilitiesDispatcher) capabilities(userData uintptr, message *string) *string {
 	n.lock.RLock()
-	defer n.lock.RUnlock()
+	cf, ok := n.capabilitiesCallbacks[userData]
+	n.lock.RUnlock()
 
 	var out string
 
-	cf, ok := n.capabilitiesCallbacks[userData]
 	if !ok {
 		return &out
 	}
 
-	msg := strings.Clone(*message)
+	var msg string
+
+	if message != nil {
+		msg = strings.Clone(*message)
+	}
 
 	out = cf(msg)
 

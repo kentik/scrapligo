@@ -69,14 +69,18 @@ func (r *recorderDispatcher) GetRecorderCallback() uintptr {
 
 func (r *recorderDispatcher) record(userData uintptr, message *string) {
 	r.lock.RLock()
-	defer r.lock.RUnlock()
-
 	rf, ok := r.recorders[userData]
+	r.lock.RUnlock()
+
 	if !ok {
 		return
 	}
 
-	msg := strings.Clone(*message)
+	var msg string
+
+	if message != nil {
+		msg = strings.Clone(*message)
+	}
 
 	rf(msg)
 }
