@@ -99,7 +99,7 @@ func (r *Result) EndTime() time.Time {
 
 // Input returns all inputs joined on newline chars.
 func (r *Result) Input() string {
-	if len(r.inputs) == 0 {
+	if len(r.inputLens) == 0 {
 		return ""
 	}
 
