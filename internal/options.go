@@ -62,6 +62,44 @@ func (o *Options) GetLogger() *scrapligologging.AnyLogger {
 	return scrapligologging.LoggerToAnyLogger(o.Logger, o.LoggerLevel)
 }
 
+// wire values for the ffi options struct's logger level field, matching libscrapli's
+// `parseLoggerLevel` mapping in `src/ffi-options.zig`.
+const (
+	ffiLoggerLevelWarn uint8 = iota
+	ffiLoggerLevelTrace
+	ffiLoggerLevelDebug
+	ffiLoggerLevelInfo
+	ffiLoggerLevelCritical
+	ffiLoggerLevelFatal
+)
+
+// ffiLoggerLevelFromLevel maps a scrapligologging.LogLevel to the uint8 wire value expected by
+// libscrapli's FFI options struct. This mapping is *not* the same as scrapligologging.IntFromLevel
+// -- that function encodes the relative severity ordering used internally (and for the per-message
+// levels reported by libscrapli at runtime), whereas libscrapli's ffi options parsing uses a
+// different, fixed mapping for the initial/configured logger level. See libscrapli's
+// `parseLoggerLevel` in `src/ffi-options.zig`.
+func ffiLoggerLevelFromLevel(level scrapligologging.LogLevel) uint8 {
+	switch level {
+	case scrapligologging.Trace:
+		return ffiLoggerLevelTrace
+	case scrapligologging.Debug:
+		return ffiLoggerLevelDebug
+	case scrapligologging.Info:
+		return ffiLoggerLevelInfo
+	case scrapligologging.Warn:
+		return ffiLoggerLevelWarn
+	case scrapligologging.Critical:
+		return ffiLoggerLevelCritical
+	case scrapligologging.Fatal:
+		return ffiLoggerLevelFatal
+	case scrapligologging.Disabled:
+		return ffiLoggerLevelFatal
+	default:
+		return ffiLoggerLevelWarn
+	}
+}
+
 // Apply applies the Options to the given driver options struct at optionsPtr.
 func (o *Options) Apply(userData, optionsPtr uintptr) error {
 	opts := (*driverOptions)(unsafe.Pointer(optionsPtr)) //nolint: govet
@@ -74,7 +112,7 @@ func (o *Options) Apply(userData, optionsPtr uintptr) error {
 	}
 
 	opts.userData = userData
-	opts.loggerLevel = uint8(scrapligologging.IntFromLevel(o.LoggerLevel))
+	opts.loggerLevel = ffiLoggerLevelFromLevel(o.LoggerLevel)
 	opts.loggerCallback = ld.GetLoggerCallback()
 
 	opts.port = &o.Port

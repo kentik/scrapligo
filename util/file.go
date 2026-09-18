@@ -62,7 +62,7 @@ func LoadFileLines(f string) ([]string, error) {
 
 	scannerErr := scanner.Err()
 	if scannerErr != nil {
-		return nil, err
+		return nil, scannerErr
 	}
 
 	return lines, nil
