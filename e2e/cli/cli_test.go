@@ -21,6 +21,8 @@ const localhost = "localhost"
 
 func slowTests() []string {
 	return []string{
+		"send-input-big-srl-bin",
+		"send-input-big-srl-ssh2",
 		"send-input-enormous-srl-bin",
 		"send-input-enormous-srl-ssh2",
 	}
