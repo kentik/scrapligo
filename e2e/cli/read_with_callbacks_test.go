@@ -95,7 +95,7 @@ func TestReadWithCallbacks(t *testing.T) {
 				}
 
 				defer func() {
-					_, _ = c.Close(ctx)
+					_, _ = c.Close(ctx, scrapligocli.WithForceClose())
 				}()
 
 				r, err := c.ReadWithCallbacks(ctx, caseData.initialInput, caseData.callbacks...)
