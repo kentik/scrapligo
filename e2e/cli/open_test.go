@@ -106,7 +106,7 @@ func TestOpenWithKey(t *testing.T) {
 			}
 
 			defer func() {
-				_, _ = c.Close(ctx)
+				_, _ = c.Close(ctx, scrapligocli.WithForceClose())
 			}()
 
 			_, err = c.Open(ctx)

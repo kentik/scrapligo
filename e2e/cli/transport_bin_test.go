@@ -107,7 +107,7 @@ func TestBinTransportProxyJump(t *testing.T) {
 			}
 
 			defer func() {
-				_, _ = c.Close(ctx)
+				_, _ = c.Close(ctx, scrapligocli.WithForceClose())
 			}()
 
 			r, err := c.SendInput(ctx, caseData.input)
