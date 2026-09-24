@@ -38,3 +38,10 @@ func WithDefinitionContent(s string, b []byte) Option {
 		return nil
 	}
 }
+
+// WithDefintionContent is kept for backward compatibility with the (misspelled) original name.
+//
+// Deprecated: use WithDefinitionContent instead.
+func WithDefintionContent(s string, b []byte) Option {
+	return WithDefinitionContent(s, b)
+}

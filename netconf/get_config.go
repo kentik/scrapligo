@@ -35,9 +35,25 @@ func (o *getConfigOptions) getSource() *uint8 {
 	return &v
 }
 
-func (o *getConfigOptions) getFilterType() *uint8 { return nil }
+func (o *getConfigOptions) getFilterType() *uint8 {
+	if o.filterType == nil {
+		return nil
+	}
 
-func (o *getConfigOptions) getDefaultsType() *uint8 { return nil }
+	v := uint8(*o.filterType)
+
+	return &v
+}
+
+func (o *getConfigOptions) getDefaultsType() *uint8 {
+	if o.defaultsType == nil {
+		return nil
+	}
+
+	v := uint8(*o.defaultsType)
+
+	return &v
+}
 
 // GetConfig executes a netconf getconfig rpc. Supported options:
 //   - WithSourceType

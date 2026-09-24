@@ -97,6 +97,67 @@ func (r *Result) EndTime() time.Time {
 	return r.Splits[len(r.Splits)-1]
 }
 
+// Input returns all inputs joined on newline chars.
+func (r *Result) Input() string {
+	if len(r.inputLens) == 0 {
+		return ""
+	}
+
+	var outSize int
+
+	for _, size := range r.inputLens {
+		outSize += int(size) //nolint: gosec
+	}
+
+	// plus newlines we will add between inputs
+	outSize += len(r.inputLens) - 1
+
+	var out strings.Builder
+
+	out.Grow(outSize)
+
+	var cur uint64
+
+	for idx, inputLen := range r.inputLens {
+		out.Write(r.inputs[cur : cur+inputLen])
+
+		cur += inputLen
+
+		if idx < len(r.inputLens)-1 {
+			out.WriteString("\n")
+		}
+	}
+
+	return out.String()
+}
+
+// InputAtIndex returns the input at the given index (rather than Input which returns all inputs
+// as one joined string).
+func (r *Result) InputAtIndex(index int) (string, error) {
+	if index < 0 || index >= len(r.inputLens) {
+		return "", scrapligoerrors.NewFfiError(
+			"index error, input",
+			nil,
+		)
+	}
+
+	outSize := int(r.inputLens[index]) //nolint: gosec
+
+	var out strings.Builder
+
+	out.Grow(outSize)
+
+	var startPos int
+
+	for _, inputLen := range r.inputLens[0:index] {
+		startPos += int(inputLen) //nolint: gosec
+	}
+
+	out.Write(r.inputs[startPos : startPos+outSize])
+
+	return out.String(), nil
+}
+
 // Result returns all results joined on newline chars.
 func (r *Result) Result() string {
 	if len(r.results) == 0 {
@@ -134,7 +195,7 @@ func (r *Result) Result() string {
 // ResultAtIndex returns the result at the given index (rather than Result which returns all
 // results as one joined string).
 func (r *Result) ResultAtIndex(index int) (string, error) {
-	if index >= len(r.resultLens) {
+	if index < 0 || index >= len(r.resultLens) {
 		return "", scrapligoerrors.NewFfiError(
 			"index error, result",
 			nil,
@@ -194,7 +255,7 @@ func (r *Result) ResultRaw() ([]byte, error) {
 // ResultRawAtIndex returns the (raw) result at the given index (rather than RawResult which returns
 // all results as one joined byte slice). Same note regarding erroring as ResultRaw.
 func (r *Result) ResultRawAtIndex(index int) ([]byte, error) {
-	if index >= len(r.resultRawJournalLens) {
+	if index < 0 || index >= len(r.resultRawJournalLens) {
 		return nil, scrapligoerrors.NewFfiError(
 			"index error, raw journal",
 			nil,

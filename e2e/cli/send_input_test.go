@@ -134,7 +134,7 @@ func TestSendInput(t *testing.T) {
 				}
 
 				defer func() {
-					_, _ = c.Close(ctx)
+					_, _ = c.Close(ctx, scrapligocli.WithForceClose())
 				}()
 
 				if caseData.postOpenF != nil {
