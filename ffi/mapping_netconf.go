@@ -19,6 +19,18 @@ func registerNetconf(m *Mapping, libScrapliFfi uintptr) {
 		"ls_netconf_fetch_operation",
 	)
 
+	purego.RegisterLibFunc(
+		&m.Netconf.getReconstructedResultRawSize,
+		libScrapliFfi,
+		"ls_netconf_get_reconstructed_result_raw_size",
+	)
+
+	purego.RegisterLibFunc(
+		&m.Netconf.getReconstructedResultRaw,
+		libScrapliFfi,
+		"ls_netconf_get_reconstructed_result_raw",
+	)
+
 	purego.RegisterLibFunc(&m.Netconf.getSessionID, libScrapliFfi, "ls_netconf_get_session_id")
 	purego.RegisterLibFunc(
 		&m.Netconf.getSubscriptionID,
@@ -100,7 +112,8 @@ type NetconfMapping struct {
 		resultSize,
 		rpcWarningsSize,
 		rpcErrorsSize,
-		errSize *uintptr,
+		errSize,
+		lastErrStrSize *uintptr,
 	) uint8
 
 	fetchOperation func(
@@ -113,7 +126,20 @@ type NetconfMapping struct {
 		result,
 		rpcWarnings,
 		rpcErrors,
-		err *[]byte,
+		err,
+		lastErrStr *[]byte,
+	) uint8
+
+	getReconstructedResultRawSize func(
+		result,
+		rawResultJournal *[]byte,
+		reconstructedSize *uintptr,
+	) uint8
+
+	getReconstructedResultRaw func(
+		result,
+		rawResultJournal,
+		reconstructed *[]byte,
 	) uint8
 
 	getSessionID func(
@@ -154,19 +180,20 @@ type NetconfMapping struct {
 		cancel *bool,
 		payload string,
 		baseNamespacePrefix string,
-		extraNamespaces string,
+		extraNamespaces *[]byte,
+		extraNamespaceLens *[]uint64,
 	) uint8
 
 	getConfig func(
 		driverPtr uintptr,
 		operationID *uint32,
 		cancel *bool,
-		source string,
+		source *uint8,
 		filter string,
-		filterType string,
+		filterType *uint8,
 		filterNamespacePrefix string,
 		filterNamespace string,
-		defaultsType string,
+		defaultsType *uint8,
 	) uint8
 
 	editConfig func(
@@ -174,39 +201,39 @@ type NetconfMapping struct {
 		operationID *uint32,
 		cancel *bool,
 		config string,
-		target string,
-		defaultOperation string,
-		testOption string,
-		errorOption string,
+		target *uint8,
+		defaultOperation *uint8,
+		testOption *uint8,
+		errorOption *uint8,
 	) uint8
 
 	copyConfig func(
 		driverPtr uintptr,
 		operationID *uint32,
 		cancel *bool,
-		target string,
-		source string,
+		target *uint8,
+		source *uint8,
 	) uint8
 
 	deleteConfig func(
 		driverPtr uintptr,
 		operationID *uint32,
 		cancel *bool,
-		target string,
+		target *uint8,
 	) uint8
 
 	lock func(
 		driverPtr uintptr,
 		operationID *uint32,
 		cancel *bool,
-		target string,
+		target *uint8,
 	) uint8
 
 	unlock func(
 		driverPtr uintptr,
 		operationID *uint32,
 		cancel *bool,
-		target string,
+		target *uint8,
 	) uint8
 
 	get func(
@@ -214,10 +241,10 @@ type NetconfMapping struct {
 		operationID *uint32,
 		cancel *bool,
 		filter string,
-		filterType string,
+		filterType *uint8,
 		filterNamespacePrefix string,
 		filterNamespace string,
-		defaultsType string,
+		defaultsType *uint8,
 	) uint8
 
 	closeSession func(
@@ -253,7 +280,7 @@ type NetconfMapping struct {
 		driverPtr uintptr,
 		operationID *uint32,
 		cancel *bool,
-		source string,
+		source *uint8,
 	) uint8
 
 	getSchema func(
@@ -262,30 +289,30 @@ type NetconfMapping struct {
 		cancel *bool,
 		identifier string,
 		version string,
-		format string,
+		format *uint8,
 	) uint8
 	getData func(
 		driverPtr uintptr,
 		operationID *uint32,
 		cancel *bool,
-		datastore,
-		filter,
-		filterType,
-		filterNamespacePrefix,
-		filterNamespace,
-		configFilter,
+		datastore *uint8,
+		filter string,
+		filterType *uint8,
+		filterNamespacePrefix string,
+		filterNamespace string,
+		configFilter *bool,
 		originFilters string,
 		maxDepth uint32,
 		withOrigin bool,
-		defaultsType string,
+		defaultsType *uint8,
 	) uint8
 	editData func(
 		driverPtr uintptr,
 		operationID *uint32,
 		cancel *bool,
-		datastore string,
+		datastore *uint8,
 		content string,
-		defaultOperation string,
+		defaultOperation *uint8,
 	) uint8
 	action func(
 		driverPtr uintptr,
@@ -338,7 +365,8 @@ func (m *NetconfMapping) FetchOperationSizes(
 	resultSize,
 	rpcWarningsSize,
 	rpcErrorsSize,
-	errSize *uintptr,
+	errSize,
+	lastErrStrSize *uintptr,
 ) error {
 	return newLibScrapliResult(
 		m.fetchOperationSizes(
@@ -350,6 +378,7 @@ func (m *NetconfMapping) FetchOperationSizes(
 			rpcWarningsSize,
 			rpcErrorsSize,
 			errSize,
+			lastErrStrSize,
 		),
 		"fetch operation sizes failed",
 	).check()
@@ -368,7 +397,8 @@ func (m *NetconfMapping) FetchOperation(
 	result,
 	rpcWarnings,
 	rpcErrors,
-	err *[]byte,
+	err,
+	lastErrStr *[]byte,
 ) error {
 	return newLibScrapliResult(
 		m.fetchOperation(
@@ -382,8 +412,42 @@ func (m *NetconfMapping) FetchOperation(
 			rpcWarnings,
 			rpcErrors,
 			err,
+			lastErrStr,
 		),
 		"fetch operation failed",
+	).check()
+}
+
+// GetReconstructedResultRawSize determines the size of the raw result based on the result and
+// the raw journal.
+func (m *NetconfMapping) GetReconstructedResultRawSize(
+	result,
+	resultRawJournal *[]byte,
+	reconstructedSize *uintptr,
+) error {
+	return newLibScrapliResult(
+		m.getReconstructedResultRawSize(
+			result,
+			resultRawJournal,
+			reconstructedSize,
+		),
+		"get reconstructed result raw size failed",
+	).check()
+}
+
+// GetReconstructedResultRaw returns the reconstructed raw from a given result/journal.
+func (m *NetconfMapping) GetReconstructedResultRaw(
+	result,
+	resultRawJournal,
+	reconstructed *[]byte,
+) error {
+	return newLibScrapliResult(
+		m.getReconstructedResultRaw(
+			result,
+			resultRawJournal,
+			reconstructed,
+		),
+		"get reconstructed result raw failed",
 	).check()
 }
 
@@ -487,7 +551,8 @@ func (m *NetconfMapping) RawRPC(
 	cancel *bool,
 	payload string,
 	baseNamespacePrefix string,
-	extraNamespaces string,
+	extraNamespaces *[]byte,
+	extraNamespaceLens *[]uint64,
 ) error {
 	return newLibScrapliResult(
 		m.rawRPC(
@@ -497,6 +562,7 @@ func (m *NetconfMapping) RawRPC(
 			payload,
 			baseNamespacePrefix,
 			extraNamespaces,
+			extraNamespaceLens,
 		),
 		"failed to submit raw rpc operation",
 	).check()
@@ -508,12 +574,12 @@ func (m *NetconfMapping) GetConfig(
 	driverPtr uintptr,
 	operationID *uint32,
 	cancel *bool,
-	source string,
+	source *uint8,
 	filter string,
-	filterType string,
+	filterType *uint8,
 	filterNamespacePrefix string,
 	filterNamespace string,
-	defaultsType string,
+	defaultsType *uint8,
 ) error {
 	return newLibScrapliResult(
 		m.getConfig(
@@ -538,10 +604,10 @@ func (m *NetconfMapping) EditConfig(
 	operationID *uint32,
 	cancel *bool,
 	config string,
-	target string,
-	defaultOperation string,
-	testOption string,
-	errorOption string,
+	target *uint8,
+	defaultOperation *uint8,
+	testOption *uint8,
+	errorOption *uint8,
 ) error {
 	return newLibScrapliResult(
 		m.editConfig(
@@ -564,8 +630,8 @@ func (m *NetconfMapping) CopyConfig(
 	driverPtr uintptr,
 	operationID *uint32,
 	cancel *bool,
-	target string,
-	source string,
+	target *uint8,
+	source *uint8,
 ) error {
 	return newLibScrapliResult(
 		m.copyConfig(
@@ -585,7 +651,7 @@ func (m *NetconfMapping) DeleteConfig(
 	driverPtr uintptr,
 	operationID *uint32,
 	cancel *bool,
-	target string,
+	target *uint8,
 ) error {
 	return newLibScrapliResult(
 		m.deleteConfig(
@@ -604,7 +670,7 @@ func (m *NetconfMapping) Lock(
 	driverPtr uintptr,
 	operationID *uint32,
 	cancel *bool,
-	target string,
+	target *uint8,
 ) error {
 	return newLibScrapliResult(
 		m.lock(
@@ -623,7 +689,7 @@ func (m *NetconfMapping) Unlock(
 	driverPtr uintptr,
 	operationID *uint32,
 	cancel *bool,
-	target string,
+	target *uint8,
 ) error {
 	return newLibScrapliResult(
 		m.unlock(
@@ -643,10 +709,10 @@ func (m *NetconfMapping) Get(
 	operationID *uint32,
 	cancel *bool,
 	filter string,
-	filterType string,
+	filterType *uint8,
 	filterNamespacePrefix string,
 	filterNamespace string,
-	defaultsType string,
+	defaultsType *uint8,
 ) error {
 	return newLibScrapliResult(
 		m.get(
@@ -758,7 +824,7 @@ func (m *NetconfMapping) Validate(
 	driverPtr uintptr,
 	operationID *uint32,
 	cancel *bool,
-	source string,
+	source *uint8,
 ) error {
 	return newLibScrapliResult(
 		m.validate(
@@ -779,7 +845,7 @@ func (m *NetconfMapping) GetSchema(
 	cancel *bool,
 	identifier string,
 	version string,
-	format string,
+	format *uint8,
 ) error {
 	return newLibScrapliResult(
 		m.getSchema(
@@ -800,16 +866,16 @@ func (m *NetconfMapping) GetData(
 	driverPtr uintptr,
 	operationID *uint32,
 	cancel *bool,
-	datastore,
-	filter,
-	filterType,
-	filterNamespacePrefix,
-	filterNamespace,
-	configFilter,
+	datastore *uint8,
+	filter string,
+	filterType *uint8,
+	filterNamespacePrefix string,
+	filterNamespace string,
+	configFilter *bool,
 	originFilters string,
 	maxDepth uint32,
 	withOrigin bool,
-	defaultsType string,
+	defaultsType *uint8,
 ) error {
 	return newLibScrapliResult(
 		m.getData(
@@ -837,9 +903,9 @@ func (m *NetconfMapping) EditData(
 	driverPtr uintptr,
 	operationID *uint32,
 	cancel *bool,
-	datastore string,
+	datastore *uint8,
 	content string,
-	defaultOperation string,
+	defaultOperation *uint8,
 ) error {
 	return newLibScrapliResult(
 		m.editData(

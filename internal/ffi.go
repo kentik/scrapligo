@@ -1,19 +1,16 @@
 package internal
 
 type driverOptions struct {
-	loggerCallback uintptr
-	loggerLevel    uintptr
-	loggerLevelLen uintptr
+	userData uintptr
 
-	port             *uint16
-	transportKind    uintptr
-	transportKindLen uintptr
+	loggerCallback uintptr
+	loggerLevel    uint8
+	port           *uint16
+	transportKind  uint8
 
 	cli struct {
-		definitionStr               uintptr
-		definitionStrLen            uintptr
-		normalizeLineFeeds          *bool
-		normalizeTrailingWhitespace *bool
+		definitionStr    uintptr
+		definitionStrLen uintptr
 	}
 
 	netconf struct {
@@ -26,16 +23,20 @@ type driverOptions struct {
 	}
 
 	session struct {
-		readSize                *uint64
-		readMinDelayNs          *uint64
-		readMaxDelayNs          *uint64
-		returnChar              uintptr
-		returnCharLen           uintptr
-		operationTimeoutNs      *uint64
-		operationMaxSearchDepth *uint64
-		recordDestination       uintptr
-		recordDestinationLen    uintptr
-		recorderCallback        uintptr
+		readSize                    *uint64
+		readMinDelayNs              *uint64
+		readMaxDelayNs              *uint64
+		returnChar                  uintptr
+		returnCharLen               uintptr
+		operationTimeoutNs          *uint64
+		operationMaxSearchDepth     *uint64
+		recordDestination           uintptr
+		recordDestinationLen        uintptr
+		recorderCallback            uintptr
+		scratchInitialSize          *uint64
+		scratchRetainMax            *uint64
+		normalizeLineFeeds          *bool
+		normalizeTrailingWhitespace *bool
 	}
 
 	auth struct {

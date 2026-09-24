@@ -4,15 +4,12 @@ import (
 	"context"
 	"strings"
 
-	scrapligoconstants "github.com/kentik/scrapligo/v2/constants"
 	scrapligoerrors "github.com/kentik/scrapligo/v2/errors"
 	scrapligoutil "github.com/kentik/scrapligo/v2/util"
 )
 
 func newSendInputsOptions(options ...Option) *sendInputsOptions {
-	o := &sendInputsOptions{
-		inputHandling: InputHandlingFuzzy,
-	}
+	o := &sendInputsOptions{}
 
 	for _, opt := range options {
 		opt(o)
@@ -23,10 +20,20 @@ func newSendInputsOptions(options ...Option) *sendInputsOptions {
 
 type sendInputsOptions struct {
 	requestedMode          string
-	inputHandling          InputHandling
+	inputHandling          *InputHandling
 	retainInput            bool
 	retainTrailingPrompt   bool
 	stopOnIndicatedFailure bool
+}
+
+func (o *sendInputsOptions) getInputHandling() *uint8 {
+	if o.inputHandling == nil {
+		return nil
+	}
+
+	v := uint8(*o.inputHandling)
+
+	return &v
 }
 
 // SendInputs send multiple "inputs" to the device.
@@ -43,7 +50,13 @@ func (c *Cli) SendInputs(
 
 	loadedOptions := newSendInputsOptions(options...)
 
-	joinedInputs := strings.Join(inputs, scrapligoconstants.LibScrapliDelimiter)
+	joinedInputs := []byte(strings.Join(inputs, ""))
+
+	inputLens := make([]uint64, len(inputs))
+
+	for idx := range inputs {
+		inputLens[idx] = uint64(len(inputs[idx]))
+	}
 
 	var operationID uint32
 
@@ -51,11 +64,13 @@ func (c *Cli) SendInputs(
 		c.ptr,
 		&operationID,
 		&cancel,
-		joinedInputs,
+		&joinedInputs,
+		&inputLens,
 		loadedOptions.requestedMode,
-		string(loadedOptions.inputHandling),
+		loadedOptions.getInputHandling(),
 		loadedOptions.retainInput,
 		loadedOptions.retainTrailingPrompt,
+		loadedOptions.stopOnIndicatedFailure,
 	)
 	if err != nil {
 		return nil, err
