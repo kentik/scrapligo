@@ -104,16 +104,29 @@ func ffiLoggerLevelFromLevel(level scrapligologging.LogLevel) uint8 {
 func (o *Options) Apply(userData, optionsPtr uintptr) error {
 	opts := (*driverOptions)(unsafe.Pointer(optionsPtr)) //nolint: govet
 
-	ld := GetLoggerDispatcher()
-
-	err := ld.Register(userData, o.Logger, o.LoggerLevel)
-	if err != nil {
-		return err
-	}
-
 	opts.userData = userData
 	opts.loggerLevel = ffiLoggerLevelFromLevel(o.LoggerLevel)
-	opts.loggerCallback = ld.GetLoggerCallback()
+
+	// only hand libscrapli a logger callback when a logger is actually configured. libscrapli
+	// invokes this callback from its *own* threads (the ffi driver operation thread, the session
+	// read thread, the netconf message thread and the ssh2 pipe threads), and each of those
+	// invocations is a foreign-thread -> go runtime transition. leaving the callback set when
+	// there is nothing to dispatch to means we pay for (and expose ourselves to) those
+	// transitions for every log line libscrapli emits, forever, for no benefit. libscrapli models
+	// the callback as an optional function pointer (`loggerCallback: ?*const fn ...` in
+	// `src/ffi-options.zig`) and null checks it before building its logger, so leaving it zeroed
+	// is the supported way to say "no logger". note `ls_alloc_driver_options` zero/default
+	// initializes the struct, so the field is already null when we skip it here.
+	if o.Logger != nil {
+		ld := GetLoggerDispatcher()
+
+		err := ld.Register(userData, o.Logger, o.LoggerLevel)
+		if err != nil {
+			return err
+		}
+
+		opts.loggerCallback = ld.GetLoggerCallback()
+	}
 
 	opts.port = &o.Port
 
