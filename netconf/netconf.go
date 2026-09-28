@@ -378,6 +378,16 @@ func (n *Netconf) getResult(
 
 	lastErrString := make([]byte, lastErrStrSize)
 
+	guards := scrapligointernal.NewFfiBufferGuards()
+
+	scrapligointernal.WatchFfiBuffer(guards, "input", &input)
+	scrapligointernal.WatchFfiBuffer(guards, "resultRawJournal", &resultRawJournal)
+	scrapligointernal.WatchFfiBuffer(guards, "result", &result)
+	scrapligointernal.WatchFfiBuffer(guards, "rpcWarnings", &rpcWarnings)
+	scrapligointernal.WatchFfiBuffer(guards, "rpcErrors", &rpcErrors)
+	scrapligointernal.WatchFfiBuffer(guards, "errString", &errString)
+	scrapligointernal.WatchFfiBuffer(guards, "lastErrString", &lastErrString)
+
 	err = n.ffiMap.Netconf.FetchOperation(
 		n.ptr,
 		operationID,
@@ -391,6 +401,11 @@ func (n *Netconf) getResult(
 		&errString,
 		&lastErrString,
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	err = guards.Verify()
 	if err != nil {
 		return nil, err
 	}

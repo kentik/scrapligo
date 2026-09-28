@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	scrapligoffi "github.com/kentik/scrapligo/v2/ffi"
+	scrapligointernal "github.com/kentik/scrapligo/v2/internal"
 	scrapligoutil "github.com/kentik/scrapligo/v2/util"
 )
 
@@ -111,11 +112,22 @@ func (r *Result) ResultRaw() ([]byte, error) {
 
 	reconstructedRaw := make([]byte, resultRawSize)
 
+	guards := scrapligointernal.NewFfiBufferGuards()
+
+	scrapligointernal.WatchFfiBuffer(guards, "resultB", &resultB)
+	scrapligointernal.WatchFfiBuffer(guards, "resultRawJournal", &r.resultRawJournal)
+	scrapligointernal.WatchFfiBuffer(guards, "reconstructedRaw", &reconstructedRaw)
+
 	err = ffiMap.Netconf.GetReconstructedResultRaw(
 		&resultB,
 		&r.resultRawJournal,
 		&reconstructedRaw,
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	err = guards.Verify()
 	if err != nil {
 		return nil, err
 	}

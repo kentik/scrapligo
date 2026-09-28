@@ -391,6 +391,23 @@ func (c *Cli) getResult(
 
 	lastErrString := make([]byte, lastErrStrSize)
 
+	guards := scrapligointernal.NewFfiBufferGuards()
+
+	scrapligointernal.WatchFfiBuffer(guards, "splits", &splits)
+	scrapligointernal.WatchFfiBuffer(guards, "inputs", &inputs)
+	scrapligointernal.WatchFfiBuffer(guards, "inputLens", &inputLens)
+	scrapligointernal.WatchFfiBuffer(guards, "resultRawJournals", &resultRawJournals)
+	scrapligointernal.WatchFfiBuffer(guards, "resultRawJournalLens", &resultRawJournalLens)
+	scrapligointernal.WatchFfiBuffer(guards, "results", &results)
+	scrapligointernal.WatchFfiBuffer(guards, "resultLens", &resultLens)
+	scrapligointernal.WatchFfiBuffer(
+		guards,
+		"resultsFailedWhenIndicator",
+		&resultsFailedWhenIndicator,
+	)
+	scrapligointernal.WatchFfiBuffer(guards, "errString", &errString)
+	scrapligointernal.WatchFfiBuffer(guards, "lastErrString", &lastErrString)
+
 	err = c.ffiMap.Cli.FetchOperation(
 		c.ptr,
 		operationID,
@@ -406,6 +423,11 @@ func (c *Cli) getResult(
 		&errString,
 		&lastErrString,
 	)
+	if err != nil {
+		return nil, err
+	}
+
+	err = guards.Verify()
 	if err != nil {
 		return nil, err
 	}
