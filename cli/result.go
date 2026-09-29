@@ -10,7 +10,6 @@ import (
 
 	scrapligoerrors "github.com/kentik/scrapligo/v2/errors"
 	scrapligoffi "github.com/kentik/scrapligo/v2/ffi"
-	scrapligointernal "github.com/kentik/scrapligo/v2/internal"
 	scrapligoutil "github.com/kentik/scrapligo/v2/util"
 )
 
@@ -302,22 +301,11 @@ func (r *Result) ResultRawAtIndex(index int) ([]byte, error) {
 
 	out := make([]byte, reconstructedSize)
 
-	guards := scrapligointernal.NewFfiBufferGuards()
-
-	scrapligointernal.WatchFfiBuffer(guards, "resultB", &resultB)
-	scrapligointernal.WatchFfiBuffer(guards, "journalEntry", &journalEntry)
-	scrapligointernal.WatchFfiBuffer(guards, "out", &out)
-
 	err = ffiMap.Cli.GetReconstructedResultRaw(
 		&resultB,
 		&journalEntry,
 		&out,
 	)
-	if err != nil {
-		return nil, err
-	}
-
-	err = guards.Verify()
 	if err != nil {
 		return nil, err
 	}
