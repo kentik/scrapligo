@@ -149,6 +149,9 @@ func (n *Netconf) Open(ctx context.Context) (*Result, error) {
 		optionsPtr,
 	)
 
+	// libscrapli installs its signal handlers during alloc, even when alloc fails
+	scrapligointernal.EnsureSignalHandlersOnStack()
+
 	if n.ptr == 0 {
 		cleanup = true
 

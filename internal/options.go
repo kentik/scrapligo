@@ -100,20 +100,47 @@ func ffiLoggerLevelFromLevel(level scrapligologging.LogLevel) uint8 {
 	}
 }
 
-// Apply applies the Options to the given driver options struct at optionsPtr.
-func (o *Options) Apply(userData, optionsPtr uintptr) error {
-	opts := (*driverOptions)(unsafe.Pointer(optionsPtr)) //nolint: govet
+// RegisterLogger registers the configured logger (if any) with the logger dispatcher and returns
+// the callback pointer to hand libscrapli -- zero when no logger is configured.
+//
+// We only hand libscrapli a logger callback when a logger is actually configured. libscrapli
+// invokes this callback from its *own* threads (the ffi driver operation thread, the session read
+// thread, the netconf message thread and the ssh2 pipe threads), and every one of those
+// invocations is a foreign-thread -> go runtime transition. Leaving the callback set when there is
+// nothing to dispatch to means we pay for (and expose ourselves to) those transitions for every
+// log line libscrapli emits, forever, for no benefit. libscrapli models the callback as an
+// optional function pointer (`loggerCallback: ?*const fn ...` in `src/ffi-options.zig`) and null
+// checks it before building its logger, so a zero callback is the supported way to say
+// "no logger".
+func (o *Options) RegisterLogger(userData uintptr) (uintptr, error) {
+	if o.Logger == nil {
+		// a zero callback is a valid, meaningful result here (it is how we tell libscrapli there
+		// is no logger), not the "invalid value" nilnil is guarding against
+		return 0, nil //nolint: nilnil
+	}
 
 	ld := GetLoggerDispatcher()
 
 	err := ld.Register(userData, o.Logger, o.LoggerLevel)
+	if err != nil {
+		return 0, err
+	}
+
+	return ld.GetLoggerCallback(), nil
+}
+
+// Apply applies the Options to the given driver options struct at optionsPtr.
+func (o *Options) Apply(userData, optionsPtr uintptr) error {
+	opts := (*driverOptions)(unsafe.Pointer(optionsPtr)) //nolint: govet
+
+	loggerCallback, err := o.RegisterLogger(userData)
 	if err != nil {
 		return err
 	}
 
 	opts.userData = userData
 	opts.loggerLevel = ffiLoggerLevelFromLevel(o.LoggerLevel)
-	opts.loggerCallback = ld.GetLoggerCallback()
+	opts.loggerCallback = loggerCallback
 
 	opts.port = &o.Port
 
