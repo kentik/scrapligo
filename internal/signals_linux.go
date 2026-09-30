@@ -49,7 +49,7 @@ func getSigaction(sig syscall.Signal) (kernelSigaction, error) {
 		syscall.SYS_RT_SIGACTION,
 		uintptr(sig),
 		0,
-		uintptr(unsafe.Pointer(&act)),
+		uintptr(unsafe.Pointer(&act)), //nolint: gosec
 		unsafe.Sizeof(act.mask),
 		0,
 		0,
@@ -65,7 +65,7 @@ func setSigaction(sig syscall.Signal, act *kernelSigaction) error {
 	_, _, errno := syscall.RawSyscall6(
 		syscall.SYS_RT_SIGACTION,
 		uintptr(sig),
-		uintptr(unsafe.Pointer(act)),
+		uintptr(unsafe.Pointer(act)), //nolint: gosec
 		0,
 		unsafe.Sizeof(act.mask),
 		0,
