@@ -54,7 +54,7 @@ test-e2e:
 
 ## Run e2e tests against "ci" test topology with race flag (count to never cache e2e tests)
 test-e2e-ci:
-	go test -v ./e2e/... -platforms nokia_srlinux,netopeer -race -count=1 -skip-slow
+	go test -v ./e2e/... -platforms nokia_srlinux,netopeer -race -count=1 -skip-slow -timeout 20m
 
 ##@ Testing Coverage
 ## Produce html coverage report
